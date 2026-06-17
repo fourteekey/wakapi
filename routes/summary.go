@@ -58,6 +58,13 @@ func (h *SummaryHandler) GetIndex(w http.ResponseWriter, r *http.Request) {
 		loadTemplates()
 	}
 
+	user := middlewares.GetPrincipal(r)
+	if user == nil {
+		w.WriteHeader(http.StatusUnauthorized)
+		templates[conf.SummaryTemplate].Execute(w, h.buildViewModel(r, w).WithError("unauthorized"))
+		return
+	}
+
 	rawQuery := r.URL.RawQuery
 	q := r.URL.Query()
 	if q.Get("interval") == "" && q.Get("from") == "" {
@@ -67,7 +74,7 @@ func (h *SummaryHandler) GetIndex(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, redirectAddress, http.StatusFound)
 		}
 
-		q.Set("interval", "today")
+		q.Set("interval", user.GetDefaultInterval())
 		r.URL.RawQuery = q.Encode()
 	} else if q.Get("interval") != "" {
 		// Send a Set-Cookie header to persist the interval
@@ -92,13 +99,6 @@ func (h *SummaryHandler) GetIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	availableFilters := h.extractAvailableFilters(summaryWithoutFilter)
-
-	user := middlewares.GetPrincipal(r)
-	if user == nil {
-		w.WriteHeader(http.StatusUnauthorized)
-		templates[conf.SummaryTemplate].Execute(w, h.buildViewModel(r, w).WithError("unauthorized"))
-		return
-	}
 
 	// user first data
 	firstData, err := h.heartbeatsSrvc.GetFirstByUser(user)

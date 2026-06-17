@@ -99,6 +99,26 @@
                 </div>
                 <div class="flex mb-8">
                     <div class="w-1/2 mr-4 inline-block">
+                        <label class="font-semibold text-foreground" for="select-default-interval">Default Time Range</label>
+                        <span class="block text-sm text-muted">Default time range used when opening a project or the summary page.</span>
+                    </div>
+                    <div class="w-1/2 ml-4">
+                        <select name="default_interval" id="select-default-interval" class="select-default">
+                            <option value="today" {{ if eq .User.DefaultInterval "today" }}selected{{ end }}>Today</option>
+                            <option value="yesterday" {{ if eq .User.DefaultInterval "yesterday" }}selected{{ end }}>Yesterday</option>
+                            <option value="week" {{ if eq .User.DefaultInterval "week" }}selected{{ end }}>This Week</option>
+                            <option value="month" {{ if eq .User.DefaultInterval "month" }}selected{{ end }}>This Month</option>
+                            <option value="year" {{ if eq .User.DefaultInterval "year" }}selected{{ end }}>This Year</option>
+                            <option value="last_7_days" {{ if eq .User.DefaultInterval "last_7_days" }}selected{{ end }}>Past 7 Days</option>
+                            <option value="last_30_days" {{ if eq .User.DefaultInterval "last_30_days" }}selected{{ end }}>Past 30 Days</option>
+                            <option value="last_6_months" {{ if eq .User.DefaultInterval "last_6_months" }}selected{{ end }}>Past 6 Months</option>
+                            <option value="last_12_months" {{ if eq .User.DefaultInterval "last_12_months" }}selected{{ end }}>Past 12 Months</option>
+                            <option value="any" {{ if eq .User.DefaultInterval "any" }}selected{{ end }}>All Time</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex mb-8">
+                    <div class="w-1/2 mr-4 inline-block">
                         <label class="font-semibold text-foreground" for="email">E-Mail Address</label>
                         <span class="block text-sm text-muted">
                             Optional in general, but required for weekly reports and for resetting your password.

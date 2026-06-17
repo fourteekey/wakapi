@@ -281,6 +281,7 @@ func (h *SettingsHandler) actionUpdateUser(w http.ResponseWriter, r *http.Reques
 	user.StartOfWeek = payload.StartOfWeek
 	user.ReportsWeekly = payload.ReportsWeekly
 	user.PublicLeaderboard = payload.PublicLeaderboard
+	user.DefaultInterval = payload.DefaultInterval
 
 	if _, err := h.userSrvc.Update(user); err != nil {
 		if strings.Contains(err.Error(), "email address already in use") {

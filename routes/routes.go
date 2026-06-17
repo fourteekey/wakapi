@@ -35,6 +35,7 @@ func DefaultTemplateFuncs() template.FuncMap {
 		"join":           strings.Join,
 		"add":            add,
 		"mulf64":         mulF64,
+		"selected":       selected,
 		"capitalize":     strutil.Capitalize,
 		"lower":          strings.ToLower,
 		"toRunes":        utils.ToRunes,
@@ -129,6 +130,15 @@ func defaultErrorRedirectTarget() string {
 
 func add(i, j int) int {
 	return i + j
+}
+
+// selected returns the HTML "selected" attribute when a and b are equal,
+// for use in <option> elements. Works across comparable types (int, string).
+func selected(a, b any) string {
+	if a == b {
+		return "selected"
+	}
+	return ""
 }
 
 func mulF64(i, j float64) float64 {

@@ -20,6 +20,7 @@ const (
 	DefaultHeartbeatsTimeoutLegacy = 2 * time.Minute
 	MinHeartbeatsTimeout           = 1 * time.Minute
 	MaxHeartbeatsTimeout           = 1 * time.Hour
+	DefaultIntervalIdentifier      = "last_7_days"
 )
 
 func init() {
@@ -58,6 +59,7 @@ type User struct {
 	ExcludeUnknownProjects bool                  `json:"-"`
 	HeartbeatsTimeoutSec   int                   `json:"-" gorm:"default:600"` // https://github.com/muety/wakapi/issues/156
 	ReadmeStatsBaseUrl     string                `json:"-" gorm:"default:''"`
+	DefaultInterval        string                `json:"-" gorm:"default:last_7_days"`
 	AuthType               string                `json:"auth_type" gorm:"default:local;uniqueIndex:idx_oidc;size:255"`
 	Sub                    string                `json:"sub" gorm:"uniqueIndex:idx_oidc;size:255;default:null"` // openid connect subject
 	WebauthnID             string                `json:"webauthn_id" gorm:"column:webauthn_id;size:255"`
@@ -105,6 +107,7 @@ type UserDataUpdate struct {
 	StartOfWeek       int    `schema:"start_of_week"`
 	ReportsWeekly     bool   `schema:"reports_weekly"`
 	PublicLeaderboard bool   `schema:"public_leaderboard"`
+	DefaultInterval   string `schema:"default_interval"`
 }
 
 type RangeByUser struct {
@@ -164,6 +167,15 @@ func (u *User) StartOfWeekDay() time.Weekday {
 		u.StartOfWeek = 1 // Default to Monday
 	}
 	return time.Weekday(u.StartOfWeek)
+}
+
+// GetDefaultInterval returns the user's configured default interval alias,
+// falling back to DefaultIntervalIdentifier if unset or invalid.
+func (u *User) GetDefaultInterval() string {
+	if ValidateDefaultInterval(u.DefaultInterval) {
+		return u.DefaultInterval
+	}
+	return DefaultIntervalIdentifier
 }
 
 func (u *User) AvatarURL(urlTemplate string) string {
@@ -265,7 +277,7 @@ func (s *Signup) IsValid() bool {
 }
 
 func (r *UserDataUpdate) IsValid() bool {
-	return ValidateEmail(r.Email) && ValidateTimezone(r.Location) && ValidateStartOfWeek(r.StartOfWeek)
+	return ValidateEmail(r.Email) && ValidateTimezone(r.Location) && ValidateStartOfWeek(r.StartOfWeek) && ValidateDefaultInterval(r.DefaultInterval)
 }
 
 func ValidateUsername(username string) bool {
@@ -294,6 +306,15 @@ func ValidateTimezone(tz string) bool {
 
 func ValidateStartOfWeek(startOfWeek int) bool {
 	return startOfWeek >= 0 && startOfWeek <= 6
+}
+
+func ValidateDefaultInterval(interval string) bool {
+	for _, k := range AllIntervals {
+		if k.HasAlias(interval) {
+			return true
+		}
+	}
+	return false
 }
 
 // WebAuthnID provides the user handle of the user account.

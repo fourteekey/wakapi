@@ -58,3 +58,36 @@ func TestUser_MinDataAge(t *testing.T) {
 	sut = &User{SubscribedUntil: &until1}
 	assert.Zero(t, sut.MinDataAge())
 }
+
+func TestUser_GetDefaultInterval(t *testing.T) {
+	// valid configured value is returned as-is
+	assert.Equal(t, "month", (&User{DefaultInterval: "month"}).GetDefaultInterval())
+	assert.Equal(t, "any", (&User{DefaultInterval: "any"}).GetDefaultInterval())
+
+	// empty falls back to the default identifier
+	assert.Equal(t, DefaultIntervalIdentifier, (&User{DefaultInterval: ""}).GetDefaultInterval())
+
+	// invalid/unknown falls back to the default identifier
+	assert.Equal(t, DefaultIntervalIdentifier, (&User{DefaultInterval: "not_an_interval"}).GetDefaultInterval())
+}
+
+func TestValidateDefaultInterval(t *testing.T) {
+	assert.True(t, ValidateDefaultInterval("today"))
+	assert.True(t, ValidateDefaultInterval("last_7_days"))
+	assert.True(t, ValidateDefaultInterval("any"))
+	assert.False(t, ValidateDefaultInterval(""))
+	assert.False(t, ValidateDefaultInterval("not_an_interval"))
+}
+
+func TestUserDataUpdate_IsValid_DefaultInterval(t *testing.T) {
+	conf.Load("", "")
+	base := UserDataUpdate{Email: "", Location: "Local", StartOfWeek: 1}
+
+	valid := base
+	valid.DefaultInterval = "last_7_days"
+	assert.True(t, valid.IsValid())
+
+	invalid := base
+	invalid.DefaultInterval = "not_an_interval"
+	assert.False(t, invalid.IsValid())
+}

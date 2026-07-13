@@ -19,16 +19,18 @@
                @input="onInput"
                @focus="onFocus"
                autocomplete="off">
-        <ul v-show="open" class="absolute left-0 right-0 mt-1 max-h-60 overflow-y-auto bg-card text-foreground rounded-md shadow z-50 text-sm">
+        <ul v-show="open && (loading || visibleOptions.length || hint || selection)"
+            class="absolute left-0 right-0 mt-1 max-h-60 overflow-y-auto bg-card text-foreground border border-muted/50 rounded-md shadow-md z-50 text-sm py-1">
             <li v-if="loading" class="px-2.5 py-1.5 text-muted">Searching …</li>
-            <li v-if="!loading && selection"
-                @mousedown.prevent="select(null)"
-                class="px-2.5 py-1.5 cursor-pointer hover:bg-focused text-muted">Clear filter</li>
-            <li v-if="!loading && hint" class="px-2.5 py-1.5 text-muted">{{ "{{" }}hint{{ "}}" }}</li>
             <li v-for="o in visibleOptions"
                 :key="o"
                 @mousedown.prevent="select(o)"
                 class="px-2.5 py-1.5 cursor-pointer hover:bg-focused truncate">{{ "{{" }}o{{ "}}" }}</li>
+            <li v-if="!loading && hint && !visibleOptions.length" class="px-2.5 py-1.5 text-muted">{{ "{{" }}hint{{ "}}" }}</li>
+            <li v-if="!loading && selection"
+                @mousedown.prevent="select(null)"
+                class="px-2.5 py-1.5 cursor-pointer hover:bg-focused text-muted flex items-center gap-x-1 border-t border-muted/50 mt-1">
+                <span class="iconify inline" data-icon="mdi:close"></span> Clear filter</li>
         </ul>
     </div>
 </template>

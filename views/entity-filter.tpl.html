@@ -24,11 +24,11 @@
             <li v-if="!loading && selection"
                 @mousedown.prevent="select(null)"
                 class="px-2.5 py-1.5 cursor-pointer hover:bg-focused text-muted">Clear filter</li>
-            <li v-if="!loading && hint" class="px-2.5 py-1.5 text-muted">${hint}</li>
+            <li v-if="!loading && hint" class="px-2.5 py-1.5 text-muted">{{ "{{" }}hint{{ "}}" }}</li>
             <li v-for="o in visibleOptions"
                 :key="o"
                 @mousedown.prevent="select(o)"
-                class="px-2.5 py-1.5 cursor-pointer hover:bg-focused truncate">${o}</li>
+                class="px-2.5 py-1.5 cursor-pointer hover:bg-focused truncate">{{ "{{" }}o{{ "}}" }}</li>
         </ul>
     </div>
 </template>

@@ -212,6 +212,7 @@ func (f *Filters) MatchDuration(d *Duration) bool {
 		(f.Language == nil || f.Language.MatchAny(d.Language)) &&
 		(f.Editor == nil || f.Editor.MatchAny(d.Editor)) &&
 		(f.Machine == nil || f.Machine.MatchAny(d.Machine)) &&
+		(f.Branch == nil || f.Branch.MatchAny(d.Branch)) &&
 		(f.Category == nil || f.Category.MatchAny(d.Category))
 }
 

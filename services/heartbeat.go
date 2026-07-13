@@ -257,8 +257,8 @@ func (srv *HeartbeatService) GetEntitySetByUser(entityType uint8, userId string)
 	return filtered, nil
 }
 
-func (srv *HeartbeatService) SearchBranchesByUser(userId, project, query string, limit int) ([]string, error) {
-	results, err := srv.repository.SearchBranchesByUser(userId, project, query, limit)
+func (srv *HeartbeatService) SearchBranchesByUser(userId, project, query string, from, to time.Time, limit int) ([]string, error) {
+	results, err := srv.repository.SearchBranchesByUser(userId, project, query, from, to, limit)
 	if err != nil {
 		return nil, err
 	}

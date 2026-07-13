@@ -55,6 +55,11 @@ function ComboboxFilter({type, options, selection, remote, minChars, debounceMs,
             const params = new URLSearchParams()
             if (this.project) params.set('project', this.project)
             params.set('q', q)
+            // forward the current time selection so only branches active in that interval are returned
+            const current = new URLSearchParams(window.location.search)
+            for (const key of ['interval', 'start', 'from', 'to']) {
+                if (current.has(key)) params.set(key, current.get(key))
+            }
             fetch(`api/branches?${params.toString()}`, {headers: {'Accept': 'application/json'}})
                 .then(res => {
                     if (!res.ok) throw new Error(`request failed with status ${res.status}`)

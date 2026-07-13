@@ -226,7 +226,7 @@ func (r *HeartbeatRepository) GetEntitySetByUser(entityType uint8, userId string
 	return results, nil
 }
 
-func (r *HeartbeatRepository) SearchBranchesByUser(userId, project, query string, limit int) ([]string, error) {
+func (r *HeartbeatRepository) SearchBranchesByUser(userId, project, query string, from, to time.Time, limit int) ([]string, error) {
 	var results []string
 	q := r.db.
 		Model(&models.Heartbeat{}).
@@ -241,6 +241,12 @@ func (r *HeartbeatRepository) SearchBranchesByUser(userId, project, query string
 		q = q.Where("project = ?", "")
 	} else if project != "" {
 		q = q.Where("project = ?", project)
+	}
+
+	// scope to the selected time interval so only branches active in that period are returned;
+	// zero from/to (e.g. when the request omits an interval) means "any time"
+	if !from.IsZero() && !to.IsZero() {
+		q = r.queryAddTimeFilterBetween(q, from, to)
 	}
 
 	if err := q.

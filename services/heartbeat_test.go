@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/leandro-lugaresi/hub"
 	"github.com/muety/wakapi/config"
@@ -33,9 +34,11 @@ func TestHeartbeatServiceTestSuite(t *testing.T) {
 func (suite *HeartbeatServiceTestSuite) TestHeartbeatService_SearchBranchesByUser_ForwardsArgs() {
 	sut := suite.createSut()
 
-	suite.HeartbeatRepository.On("SearchBranchesByUser", TestUserId2, "myproject", "mai", 50).Return([]string{"main"}, nil)
+	from := time.Unix(1000, 0)
+	to := time.Unix(2000, 0)
+	suite.HeartbeatRepository.On("SearchBranchesByUser", TestUserId2, "myproject", "mai", from, to, 50).Return([]string{"main"}, nil)
 
-	result, err := sut.SearchBranchesByUser(TestUserId2, "myproject", "mai", 50)
+	result, err := sut.SearchBranchesByUser(TestUserId2, "myproject", "mai", from, to, 50)
 
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), []string{"main"}, result)
@@ -45,9 +48,9 @@ func (suite *HeartbeatServiceTestSuite) TestHeartbeatService_SearchBranchesByUse
 func (suite *HeartbeatServiceTestSuite) TestHeartbeatService_SearchBranchesByUser_PropagatesError() {
 	sut := suite.createSut()
 
-	suite.HeartbeatRepository.On("SearchBranchesByUser", TestUserId2, "", "mai", 50).Return([]string(nil), errors.New("boom"))
+	suite.HeartbeatRepository.On("SearchBranchesByUser", TestUserId2, "", "mai", time.Time{}, time.Time{}, 50).Return([]string(nil), errors.New("boom"))
 
-	result, err := sut.SearchBranchesByUser(TestUserId2, "", "mai", 50)
+	result, err := sut.SearchBranchesByUser(TestUserId2, "", "mai", time.Time{}, time.Time{}, 50)
 
 	assert.Error(suite.T(), err)
 	assert.Nil(suite.T(), result)
@@ -57,9 +60,9 @@ func (suite *HeartbeatServiceTestSuite) TestHeartbeatService_SearchBranchesByUse
 func (suite *HeartbeatServiceTestSuite) TestHeartbeatService_SearchBranchesByUser_FiltersWhitespaceOnly() {
 	sut := suite.createSut()
 
-	suite.HeartbeatRepository.On("SearchBranchesByUser", TestUserId2, "", "mai", 50).Return([]string{"main", "   ", "", "maintenance"}, nil)
+	suite.HeartbeatRepository.On("SearchBranchesByUser", TestUserId2, "", "mai", time.Time{}, time.Time{}, 50).Return([]string{"main", "   ", "", "maintenance"}, nil)
 
-	result, err := sut.SearchBranchesByUser(TestUserId2, "", "mai", 50)
+	result, err := sut.SearchBranchesByUser(TestUserId2, "", "mai", time.Time{}, time.Time{}, 50)
 
 	assert.NoError(suite.T(), err)
 	assert.Equal(suite.T(), []string{"main", "maintenance"}, result)

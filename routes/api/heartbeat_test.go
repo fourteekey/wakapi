@@ -148,7 +148,8 @@ func TestHeartbeatHandler_GetBranches(t *testing.T) {
 		handler := NewHeartbeatApiHandler(userServiceMock, heartbeatServiceMock, nil)
 
 		expected := []string{"main", "maintenance"}
-		heartbeatServiceMock.On("SearchBranchesByUser", "testuser", "myproject", "mai", 50).Return(expected, nil)
+		// no interval/from/to on the request -> zero time range (search across all time)
+		heartbeatServiceMock.On("SearchBranchesByUser", "testuser", "myproject", "mai", time.Time{}, time.Time{}, 50).Return(expected, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/branches?project=myproject&q=mai", nil)
 		req = withPrincipal(req, user)
@@ -166,13 +167,33 @@ func TestHeartbeatHandler_GetBranches(t *testing.T) {
 		heartbeatServiceMock.AssertExpectations(t)
 	})
 
+	t.Run("should scope the search to the selected interval when one is given", func(t *testing.T) {
+		userServiceMock := new(mocks.UserServiceMock)
+		heartbeatServiceMock := new(mocks.HeartbeatServiceMock)
+		handler := NewHeartbeatApiHandler(userServiceMock, heartbeatServiceMock, nil)
+
+		expected := []string{"main"}
+		nonZero := func(t time.Time) bool { return !t.IsZero() }
+		heartbeatServiceMock.On("SearchBranchesByUser", "testuser", "myproject", "mai",
+			mock.MatchedBy(nonZero), mock.MatchedBy(nonZero), 50).Return(expected, nil)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/branches?project=myproject&q=mai&interval=today", nil)
+		req = withPrincipal(req, user)
+		rec := httptest.NewRecorder()
+
+		handler.GetBranches(rec, req)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		heartbeatServiceMock.AssertExpectations(t)
+	})
+
 	t.Run("should trim surrounding whitespace from the query before forwarding", func(t *testing.T) {
 		userServiceMock := new(mocks.UserServiceMock)
 		heartbeatServiceMock := new(mocks.HeartbeatServiceMock)
 		handler := NewHeartbeatApiHandler(userServiceMock, heartbeatServiceMock, nil)
 
 		expected := []string{"main"}
-		heartbeatServiceMock.On("SearchBranchesByUser", "testuser", "", "main", 50).Return(expected, nil)
+		heartbeatServiceMock.On("SearchBranchesByUser", "testuser", "", "main", time.Time{}, time.Time{}, 50).Return(expected, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/branches?q=%20%20main%20%20", nil)
 		req = withPrincipal(req, user)
@@ -189,7 +210,7 @@ func TestHeartbeatHandler_GetBranches(t *testing.T) {
 		heartbeatServiceMock := new(mocks.HeartbeatServiceMock)
 		handler := NewHeartbeatApiHandler(userServiceMock, heartbeatServiceMock, nil)
 
-		heartbeatServiceMock.On("SearchBranchesByUser", "testuser", "", "main", 50).Return([]string(nil), errors.New("boom"))
+		heartbeatServiceMock.On("SearchBranchesByUser", "testuser", "", "main", time.Time{}, time.Time{}, 50).Return([]string(nil), errors.New("boom"))
 
 		req := httptest.NewRequest(http.MethodGet, "/api/branches?q=main", nil)
 		req = withPrincipal(req, user)

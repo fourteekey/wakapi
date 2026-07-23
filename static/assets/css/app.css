@@ -182,6 +182,7 @@ main {
 
 .entity-filter-control {
     width: 180px;
+    position: relative;
     @apply text-foreground text-sm;
 }
 
@@ -191,6 +192,61 @@ main {
 
 .entity-filter-control select {
     @apply truncate py-1.5 px-2.5;
+}
+
+/* searchable combobox filter (Project / Branch): match the native <select> filters */
+.entity-filter-control input.select-default {
+    padding: .375rem .625rem;
+}
+
+.entity-filter-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    padding: 4px;
+    max-height: 15rem;
+    overflow-y: auto;
+    z-index: 50;
+    font-size: .875rem;
+    background-color: rgb(var(--card));
+    border: 1px solid rgb(var(--muted) / .35);
+    border-radius: .375rem;
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / .35), 0 4px 6px -4px rgb(0 0 0 / .35);
+}
+
+.entity-filter-dropdown li {
+    padding: .375rem .5rem;
+    border-radius: .25rem;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.entity-filter-dropdown li:hover {
+    background-color: rgb(var(--focused));
+}
+
+.entity-filter-dropdown li.is-info,
+.entity-filter-dropdown li.is-info:hover {
+    color: rgb(var(--muted));
+    background-color: transparent;
+    cursor: default;
+}
+
+.entity-filter-dropdown li.clear-item {
+    margin-top: 4px;
+    padding-top: .5rem;
+    border-top: 1px solid rgb(var(--muted) / .25);
+    border-radius: 0;
+    color: rgb(var(--muted));
+}
+
+.entity-filter-dropdown li.clear-item:hover {
+    color: rgb(var(--foreground));
+    background-color: rgb(var(--focused));
 }
 
 /*

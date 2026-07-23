@@ -30,10 +30,11 @@ function ComboboxFilter({type, options, selection, remote, minChars, debounceMs,
             this.open = true
             if (!this.remote) {
                 if (!this.visibleOptions.length) this.filterLocal()
-            } else if (this.multiple && !this.query.trim() && this.selected.length && !this.visibleOptions.length) {
-                // show already-selected branches (checked, removable) before the user types
-                this.visibleOptions = this.selected.slice()
+            } else if (!this.visibleOptions.length && !this.loading) {
+                // no minimum query length: load matches immediately on focus (empty query -> all, capped)
                 this.hint = ''
+                this.loading = true
+                this.fetchRemote(this.query.trim())
             }
         },
         filterLocal() {

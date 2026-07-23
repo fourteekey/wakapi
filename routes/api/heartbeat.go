@@ -71,7 +71,7 @@ func (h *HeartbeatApiHandler) RegisterRoutes(router chi.Router) {
 // @Tags heartbeat
 // @Produce json
 // @Param project query string false "Project to scope the search to"
-// @Param q query string false "Case-insensitive substring to search for (min. 3 chars)"
+// @Param q query string false "Case-insensitive substring to search for (empty matches all, capped at 50)"
 // @Param interval query string false "Interval identifier to scope the search to (e.g. today, last_30_days)"
 // @Param from query string false "Start date (alternative to interval)"
 // @Param to query string false "End date (alternative to interval)"
@@ -83,11 +83,6 @@ func (h *HeartbeatApiHandler) GetBranches(w http.ResponseWriter, r *http.Request
 
 	project := r.URL.Query().Get("project")
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
-
-	if len(query) < 3 {
-		helpers.RespondJSON(w, r, http.StatusOK, []string{})
-		return
-	}
 
 	// scope the search to the selected time interval (interval / from-to). If the request omits
 	// a valid range, fall back to searching across all time (zero from/to).

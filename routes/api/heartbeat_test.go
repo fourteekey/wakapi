@@ -121,10 +121,13 @@ func TestHeartbeatHandler_GetBranches(t *testing.T) {
 
 	user := &models.User{ID: "testuser"}
 
-	t.Run("should return empty array without calling the service when query is shorter than 3 chars", func(t *testing.T) {
+	t.Run("should forward short and empty queries to the service (no minimum length)", func(t *testing.T) {
 		userServiceMock := new(mocks.UserServiceMock)
 		heartbeatServiceMock := new(mocks.HeartbeatServiceMock)
 		handler := NewHeartbeatApiHandler(userServiceMock, heartbeatServiceMock, nil)
+
+		expected := []string{"ab", "abc"}
+		heartbeatServiceMock.On("SearchBranchesByUser", "testuser", "", "ab", time.Time{}, time.Time{}, 50).Return(expected, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/branches?q=ab", nil)
 		req = withPrincipal(req, user)
@@ -137,9 +140,9 @@ func TestHeartbeatHandler_GetBranches(t *testing.T) {
 		var branches []string
 		err := json.Unmarshal(rec.Body.Bytes(), &branches)
 		assert.NoError(t, err)
-		assert.Empty(t, branches)
+		assert.Equal(t, expected, branches)
 
-		heartbeatServiceMock.AssertNotCalled(t, "SearchBranchesByUser", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+		heartbeatServiceMock.AssertExpectations(t)
 	})
 
 	t.Run("should forward exact args to the service and return the branches as a JSON string array", func(t *testing.T) {

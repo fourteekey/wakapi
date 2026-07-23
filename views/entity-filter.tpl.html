@@ -9,25 +9,31 @@
 </template>
 
 <template id="combobox-filter-template">
-    <div :id="type + '-filter-form'" class="entity-filter-control relative" @keydown="onKeydown">
+    <div :id="type + '-filter-form'" class="entity-filter-control combobox" :class="{ open: open }" @click.stop @keydown="onKeydown">
         <label :for="'input-' + type + '-filter'"><span class="iconify inline mr-1" data-icon="mdi:filter"></span> ${type}</label>
         <input type="text"
                :id="'input-' + type + '-filter'"
-               class="select-default"
-               :placeholder="'Filter by ' + type + ' ...'"
+               class="combobox-input"
+               :placeholder="placeholderText()"
                v-model="query"
                @input="onInput"
                @focus="onFocus"
+               @click="onFocus"
                autocomplete="off">
-        <ul v-show="open && (loading || visibleOptions.length || hint || selection)" class="entity-filter-dropdown">
+        <ul v-show="open && (loading || visibleOptions.length || hint || (multiple ? selected.length : selection))" class="entity-filter-dropdown">
             <li v-if="loading" class="is-info">Searching …</li>
+            <li v-if="multiple && !loading && visibleOptions.length"
+                class="selall"
+                :class="{ on: allVisibleSelected() }"
+                @mousedown.prevent="selectAllVisible()"><span class="box"></span>{{ "{{" }}allVisibleSelected() ? 'Deselect all' : 'Select all'{{ "}}" }} ({{ "{{" }}visibleOptions.length{{ "}}" }})</li>
             <li v-for="o in visibleOptions"
                 :key="o"
-                @mousedown.prevent="select(o)">{{ "{{" }}o{{ "}}" }}</li>
+                :class="{ on: multiple && isSelected(o), sel: !multiple && o === selection }"
+                @mousedown.prevent="multiple ? toggle(o) : select(o)"><span v-if="multiple" class="box"></span>{{ "{{" }}o{{ "}}" }}</li>
             <li v-if="!loading && hint && !visibleOptions.length" class="is-info">{{ "{{" }}hint{{ "}}" }}</li>
-            <li v-if="!loading && selection"
-                @mousedown.prevent="select(null)"
-                class="clear-item">Clear filter</li>
+            <li v-if="!loading && (multiple ? selected.length : selection)"
+                class="clear-item"
+                @mousedown.prevent="multiple ? clearAll() : select(null)">{{ "{{" }}multiple ? 'Clear all (' + selected.length + ')' : 'Clear filter'{{ "}}" }}</li>
         </ul>
     </div>
 </template>

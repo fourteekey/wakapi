@@ -1,10 +1,10 @@
-function ComboboxFilter({type, options, selection, remote, minChars, debounceMs, project}) {
+function ComboboxFilter({type, options, selection, remote, minChars, debounceMs, project, multiple}) {
     return {
         $template: '#combobox-filter-template',
         $delimiters: ['${', '}'],
         type: type,
+        multiple: !!multiple,
         options: options || [],
-        selection: selection || null,
         remote: !!remote,
         minChars: minChars || 1,
         debounceMs: debounceMs || 300,
@@ -14,19 +14,27 @@ function ComboboxFilter({type, options, selection, remote, minChars, debounceMs,
         loading: false,
         hint: '',
         visibleOptions: [],
+        selection: multiple ? null : (selection || null), // single-select value
+        selected: [],                                      // multi-select values
+        _initialKey: '',                                   // to detect a real change on close
         _debounceTimer: null,
         _boundOutside: null,
+
+        // ---- input / search ----
         onInput() {
             this.open = true
-            if (this.remote) {
-                this.onRemoteInput()
-            } else {
-                this.filterLocal()
-            }
+            if (this.remote) this.onRemoteInput()
+            else this.filterLocal()
         },
         onFocus() {
             this.open = true
-            if (!this.remote && !this.visibleOptions.length) this.filterLocal()
+            if (!this.remote) {
+                if (!this.visibleOptions.length) this.filterLocal()
+            } else if (this.multiple && !this.query.trim() && this.selected.length && !this.visibleOptions.length) {
+                // show already-selected branches (checked, removable) before the user types
+                this.visibleOptions = this.selected.slice()
+                this.hint = ''
+            }
         },
         filterLocal() {
             const q = this.query.trim().toLowerCase()
@@ -77,13 +85,15 @@ function ComboboxFilter({type, options, selection, remote, minChars, debounceMs,
                     this.hint = 'Search failed'
                 })
         },
+
+        // ---- single-select ----
         select(option) {
             this.selection = option
             this.query = option
             this.open = false
             this.$nextTick(() => {
                 const query = new URLSearchParams(window.location.search)
-                const val = this.selection === 'unknown' ? '-' : this.selection  // will break if the value is actually named "unknown"
+                const val = this.selection === 'unknown' ? '-' : this.selection // will break if the value is actually named "unknown"
                 if (this.selection) query.set(this.type, val)
                 else query.delete(this.type)
                 // branches are project-scoped, so changing/clearing the project invalidates any active branch filter
@@ -91,22 +101,63 @@ function ComboboxFilter({type, options, selection, remote, minChars, debounceMs,
                 window.location.search = query.toString()
             })
         },
-        onKeydown(e) {
-            if (e.key === 'Escape') {
-                this.open = false
+
+        // ---- multi-select ----
+        isSelected(o) { return this.selected.includes(o) },
+        toggle(o) {
+            this.selected = this.selected.includes(o)
+                ? this.selected.filter(x => x !== o)
+                : [...this.selected, o]
+        },
+        allVisibleSelected() {
+            return this.visibleOptions.length > 0 && this.visibleOptions.every(o => this.selected.includes(o))
+        },
+        selectAllVisible() {
+            if (this.allVisibleSelected()) {
+                this.selected = this.selected.filter(o => !this.visibleOptions.includes(o))
+            } else {
+                this.selected = [...new Set([...this.selected, ...this.visibleOptions])]
             }
         },
-        onClickOutside(e) {
-            if (this.$el && !this.$el.contains(e.target)) this.open = false
+        clearAll() { this.selected = [] },
+        placeholderText() {
+            if (this.multiple && !this.open && this.selected.length) {
+                return this.selected.length + (this.selected.length === 1 ? ' branch selected' : ' branches selected')
+            }
+            return 'Filter by ' + this.type + ' ...'
         },
-        mounted() {
+
+        // ---- open / close ----
+        closeAndApply() {
+            this.open = false
+            if (this.multiple) this.applyMulti()
+        },
+        applyMulti() {
+            const key = this.selected.slice().sort().join('')
+            if (key === this._initialKey) return // nothing changed -> no reload
             const query = new URLSearchParams(window.location.search)
-            if (query.has(this.type)) {
-                const val = query.get(this.type) === '-' ? 'unknown' : query.get(this.type)
+            query.delete(this.type)
+            this.selected.forEach(b => query.append(this.type, b))
+            window.location.search = query.toString()
+        },
+        onKeydown(e) {
+            if (e.key === 'Escape') this.closeAndApply()
+        },
+        onClickOutside(e) {
+            if (this.$el && !this.$el.contains(e.target)) this.closeAndApply()
+        },
+
+        mounted() {
+            const params = new URLSearchParams(window.location.search)
+            if (this.multiple) {
+                this.selected = params.getAll(this.type).filter(Boolean)
+                this._initialKey = this.selected.slice().sort().join('')
+            } else if (params.has(this.type)) {
+                const val = params.get(this.type) === '-' ? 'unknown' : params.get(this.type)
                 this.selection = val
                 this.query = val
             }
-            if (!this.remote) this.filterLocal()
+            if (!this.remote && !this.multiple) this.filterLocal()
             this._boundOutside = e => this.onClickOutside(e)
             document.addEventListener('click', this._boundOutside)
         },

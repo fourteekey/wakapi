@@ -67,6 +67,15 @@
 .entity-filter-dropdown li.selall { color: rgb(var(--secondary)); font-weight: 600; border-bottom: 1px solid rgb(var(--muted) / .2); }
 .entity-filter-dropdown li.clear-item { color: rgb(var(--muted)); border-top: 1px solid rgb(var(--muted) / .2); }
 .entity-filter-dropdown li.clear-item:hover { color: rgb(var(--foreground)); background-color: rgb(var(--card)); }
+.entity-filter-dropdown li.apply-item {
+    justify-content: center;
+    margin: 4px;
+    border-radius: 4px;
+    background-color: rgb(var(--accent));
+    color: rgb(var(--primary));
+    font-weight: 600;
+}
+.entity-filter-dropdown li.apply-item:hover { background-color: rgb(var(--accent) / .85); }
 </style>
 
 <template id="entity-filter-template">
@@ -105,6 +114,9 @@
             <li v-if="!loading && (multiple ? selected.length : selection)"
                 class="clear-item"
                 @mousedown.prevent="multiple ? clearAll() : select(null)">{{ "{{" }}multiple ? 'Clear all (' + selected.length + ')' : 'Clear filter'{{ "}}" }}</li>
+            <li v-if="multiple && !loading && selected.length"
+                class="apply-item"
+                @mousedown.prevent="applyMulti()">{{ "{{" }}'Apply (' + selected.length + ')'{{ "}}" }}</li>
         </ul>
     </div>
 </template>

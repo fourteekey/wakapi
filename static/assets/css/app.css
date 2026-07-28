@@ -286,6 +286,17 @@ main {
     background-color: rgb(var(--card));
 }
 
+.entity-filter-dropdown li.apply-item {
+    justify-content: center;
+    margin: 4px;
+    border-radius: 4px;
+    background-color: rgb(var(--accent));
+    color: rgb(var(--primary));
+    font-weight: 600;
+}
+
+.entity-filter-dropdown li.apply-item:hover { background-color: rgb(var(--accent) / .85); }
+
 /*
 #summary-page svg rect {
     cursor: help;

@@ -143,6 +143,7 @@ function ComboboxFilter({type, options, selection, remote, minChars, debounceMs,
         },
         onKeydown(e) {
             if (e.key === 'Escape') this.closeAndApply()
+            else if (e.key === 'Enter' && this.multiple) { e.preventDefault(); this.applyMulti() }
         },
         onClickOutside(e) {
             if (this.$el && !this.$el.contains(e.target)) this.closeAndApply()

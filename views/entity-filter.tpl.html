@@ -106,7 +106,7 @@
                 class="selall"
                 :class="{ on: allVisibleSelected() }"
                 @mousedown.prevent="selectAllVisible()"><span class="box"></span>{{ "{{" }}allVisibleSelected() ? 'Deselect all' : 'Select all'{{ "}}" }} ({{ "{{" }}visibleOptions.length{{ "}}" }})</li>
-            <li v-for="o in visibleOptions"
+            <li v-for="o in (loading ? [] : visibleOptions)"
                 :key="o"
                 :class="{ on: multiple && isSelected(o), sel: !multiple && o === selection }"
                 @mousedown.prevent="multiple ? toggle(o) : select(o)"><span v-if="multiple" class="box"></span>{{ "{{" }}o{{ "}}" }}</li>

@@ -19,6 +19,7 @@ function ComboboxFilter({type, options, selection, remote, minChars, debounceMs,
         _initialKey: '',                                   // to detect a real change on close
         _debounceTimer: null,
         _boundOutside: null,
+        _seq: 0,                                           // request sequence to ignore stale responses
 
         // ---- input / search ----
         onInput() {
@@ -69,17 +70,20 @@ function ComboboxFilter({type, options, selection, remote, minChars, debounceMs,
             for (const key of ['interval', 'start', 'from', 'to']) {
                 if (current.has(key)) params.set(key, current.get(key))
             }
+            const seq = ++this._seq // only the latest request may update the UI
             fetch(`api/branches?${params.toString()}`, {headers: {'Accept': 'application/json'}})
                 .then(res => {
                     if (!res.ok) throw new Error(`request failed with status ${res.status}`)
                     return res.json()
                 })
                 .then(data => {
+                    if (seq !== this._seq) return // a newer search superseded this response
                     this.visibleOptions = Array.isArray(data) ? data : []
                     this.loading = false
                     this.hint = this.visibleOptions.length ? '' : 'No matches'
                 })
                 .catch(err => {
+                    if (seq !== this._seq) return
                     console.error('branch search failed', err)
                     this.visibleOptions = []
                     this.loading = false

@@ -86,6 +86,7 @@ run:
 # so stopping/removing the container does NOT touch the database.
 # Deploy another branch: make deploy BRANCH=master
 deploy:
+	-docker tag $(DEPLOY_IMAGE) $(DEPLOY_IMAGE:latest=prev) 2>/dev/null || true
 	docker build -t $(DEPLOY_IMAGE) "$(REPO)#$(BRANCH)"
 	-docker rm -f $(CONTAINER) 2>/dev/null || true
 	docker run -d --name $(CONTAINER) \
@@ -93,6 +94,10 @@ deploy:
 		-v $(VOLUME):/data \
 		-e WAKAPI_PUBLIC_URL=$(PUBLIC_URL) \
 		-e WAKAPI_INSECURE_COOKIES=$(INSECURE_COOKIES) \
+		-e WAKAPI_ALLOW_SIGNUP=false \
 		--restart unless-stopped \
 		$(DEPLOY_IMAGE)
+	# disk on the server is small: drop build cache and dangling images (keeps :prev for rollback)
+	docker builder prune -af
+	docker image prune -f
 	@echo "Wakapi ($(BRANCH)) deployed as $(CONTAINER) -> $(PUBLIC_URL)"

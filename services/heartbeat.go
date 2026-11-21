@@ -7,31 +7,47 @@ import (
 	"time"
 
 	datastructure "github.com/duke-git/lancet/v2/datastructure/set"
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/leandro-lugaresi/hub"
 	"github.com/muety/wakapi/config"
 	"github.com/muety/wakapi/repositories"
-	"github.com/patrickmn/go-cache"
 
 	"github.com/muety/wakapi/models"
 )
 
 type HeartbeatService struct {
 	config              *config.Config
-	cache               *cache.Cache
+	cache               *ttlcache.Cache[string, any]
+	countCache          *ttlcache.Cache[string, int64] // deliberately separate from cache, so count increments don't contend with the heartbeat cache's cacheLock
 	eventBus            *hub.Hub
 	repository          repositories.IHeartbeatRepository
 	languageMappingSrvc ILanguageMappingService
-	entityCacheLock     *sync.RWMutex
+	cacheLock           *sync.RWMutex
+	countLock           *sync.Mutex
 }
 
 func NewHeartbeatService(heartbeatRepo repositories.IHeartbeatRepository, languageMappingService ILanguageMappingService) *HeartbeatService {
+	c := ttlcache.New[string, any](
+		ttlcache.WithTTL[string, any](24*time.Hour),
+		ttlcache.WithDisableTouchOnHit[string, any](),
+	)
+	go c.Start()
+
+	countCache := ttlcache.New[string, int64](
+		ttlcache.WithTTL[string, int64](24*time.Hour),
+		ttlcache.WithDisableTouchOnHit[string, int64](),
+	)
+	go countCache.Start()
+
 	srv := &HeartbeatService{
 		config:              config.Get(),
-		cache:               cache.New(24*time.Hour, 24*time.Hour),
+		cache:               c,
+		countCache:          countCache,
 		eventBus:            config.EventBus(),
 		repository:          heartbeatRepo,
 		languageMappingSrvc: languageMappingService,
-		entityCacheLock:     &sync.RWMutex{},
+		cacheLock:           &sync.RWMutex{}, // if this turns out as a bottleneck, we might switch to per-user caches organized in a map
+		countLock:           &sync.Mutex{},
 	}
 
 	// using event hub is an unnecessary indirection here, however, we might
@@ -41,13 +57,22 @@ func NewHeartbeatService(heartbeatRepo repositories.IHeartbeatRepository, langua
 	go func(sub *hub.Subscription) {
 		for m := range sub.Receiver {
 			heartbeat := m.Fields[config.FieldPayload].(*models.Heartbeat)
-			srv.cache.IncrementInt64(srv.countByUserCacheKey(heartbeat.UserID), 1) // increment doesn't update expiration time
-			srv.cache.IncrementInt64(srv.countTotalCacheKey(), 1)
+			srv.incrementCount(srv.countByUserCacheKey(heartbeat.UserID), 1) // increment doesn't update expiration time
+			srv.incrementCount(srv.countTotalCacheKey(), 1)
 			srv.checkInvalidateRangeCache(heartbeat)
+			srv.updateLatestHeartbeatCache(heartbeat)
 		}
 	}(&sub1)
 
 	return srv
+}
+
+func (srv *HeartbeatService) incrementCount(key string, delta int64) {
+	srv.countLock.Lock()
+	defer srv.countLock.Unlock()
+	if item := srv.countCache.Get(key); item != nil {
+		srv.countCache.Set(key, item.Value()+delta, ttlcache.PreviousOrDefaultTTL)
+	}
 }
 
 func (srv *HeartbeatService) Insert(heartbeat *models.Heartbeat) error {
@@ -81,26 +106,24 @@ func (srv *HeartbeatService) InsertBatch(heartbeats []*models.Heartbeat) error {
 }
 
 func (srv *HeartbeatService) Count(approximate bool) (int64, error) {
-	result, ok := srv.cache.Get(srv.countTotalCacheKey())
-	if ok {
-		return result.(int64), nil
+	if item := srv.countCache.Get(srv.countTotalCacheKey()); item != nil {
+		return item.Value(), nil
 	}
 	count, err := srv.repository.Count(approximate)
 	if err == nil {
-		srv.cache.Set(srv.countTotalCacheKey(), count, srv.countCacheTtl())
+		srv.countCache.Set(srv.countTotalCacheKey(), count, srv.countCacheTtl())
 	}
 	return count, err
 }
 
 func (srv *HeartbeatService) CountByUser(user *models.User) (int64, error) {
 	key := srv.countByUserCacheKey(user.ID)
-	result, ok := srv.cache.Get(key)
-	if ok {
-		return result.(int64), nil
+	if item := srv.countCache.Get(key); item != nil {
+		return item.Value(), nil
 	}
 	count, err := srv.repository.CountByUser(user)
 	if err == nil {
-		srv.cache.Set(key, count, srv.countCacheTtl())
+		srv.countCache.Set(key, count, srv.countCacheTtl())
 	}
 	return count, err
 }
@@ -111,9 +134,8 @@ func (srv *HeartbeatService) CountByUsers(users []*models.User) ([]*models.Count
 
 	for _, u := range users {
 		key := srv.countByUserCacheKey(u.ID)
-		result, ok := srv.cache.Get(key)
-		if ok {
-			userCounts = append(userCounts, &models.CountByUser{User: u.ID, Count: result.(int64)})
+		if item := srv.countCache.Get(key); item != nil {
+			userCounts = append(userCounts, &models.CountByUser{User: u.ID, Count: item.Value()})
 		} else {
 			missingUsers = append(missingUsers, u)
 		}
@@ -126,7 +148,7 @@ func (srv *HeartbeatService) CountByUsers(users []*models.User) ([]*models.Count
 
 	for _, uc := range counts {
 		key := srv.countByUserCacheKey(uc.User)
-		srv.cache.Set(key, uc.Count, srv.countCacheTtl())
+		srv.countCache.Set(key, uc.Count, srv.countCacheTtl())
 		userCounts = append(userCounts, uc)
 	}
 
@@ -158,6 +180,12 @@ func (srv *HeartbeatService) StreamAllWithinRaw(from, to time.Time, user *models
 	return srv.repository.StreamWithin(from, to, user) // no augmentation
 }
 
+// StreamAllWithinExcludingHeartbeats streams heartbeats within the given interval without augmenting them,
+// excluding heartbeats matching any of the given exclusions (see models.ExcludeFromDurations).
+func (srv *HeartbeatService) StreamAllWithinExcludingHeartbeats(from, to time.Time, user *models.User, exclusions []models.HeartbeatExclusionFilter) (chan *models.Heartbeat, error) {
+	return srv.repository.StreamWithinExcludingHeartbeats(from, to, user, exclusions) // no augmentation
+}
+
 func (srv *HeartbeatService) GetAllWithinByFilters(from, to time.Time, user *models.User, filters *models.Filters) ([]*models.Heartbeat, error) {
 	heartbeats, err := srv.repository.GetAllWithinByFilters(from, to, user, srv.filtersToColumnMap(filters))
 	if err != nil {
@@ -179,16 +207,65 @@ func (srv *HeartbeatService) StreamAllWithinByFilters(from, to time.Time, user *
 	return srv.augmentedAsync(c, languageMapping)
 }
 
-func (srv *HeartbeatService) GetLatestByUser(user *models.User) (*models.Heartbeat, error) {
-	return srv.repository.GetLatestByUser(user)
+func (srv *HeartbeatService) GetLatestByUser(user *models.User, skipCache bool) (*models.Heartbeat, error) {
+	cacheKey := srv.latestByUserCacheKey(user.ID)
+	if !skipCache {
+		if item := srv.cache.Get(cacheKey); item != nil {
+			srv.cacheLock.RLock()
+			defer srv.cacheLock.RUnlock()
+			return item.Value().(*models.Heartbeat), nil
+		}
+	}
+
+	heartbeat, err := srv.repository.GetLatestByUser(user)
+	if err != nil {
+		return nil, err
+	}
+
+	// cache even when no row was found
+	// such an entry is treated as time-zero by refreshLatestCacheEntry and hence upgraded automatically once a heartbeat arrives
+	srv.cacheLock.Lock()
+	defer srv.cacheLock.Unlock()
+	srv.cache.Set(cacheKey, cloneHeartbeat(heartbeat), ttlcache.DefaultTTL)
+	return heartbeat, nil
 }
 
 func (srv *HeartbeatService) GetLatestByOriginAndUser(origin string, user *models.User) (*models.Heartbeat, error) {
 	return srv.repository.GetLatestByOriginAndUser(origin, user)
 }
 
-func (srv *HeartbeatService) GetLatestByFilters(user *models.User, filters *models.Filters) (*models.Heartbeat, error) {
-	return srv.repository.GetLatestByFilters(user, srv.filtersToColumnMap(filters))
+func (srv *HeartbeatService) GetLatestByFilters(user *models.User, filters *models.Filters, skipCache bool) (*models.Heartbeat, error) {
+	columnMap := srv.filtersToColumnMap(filters)
+
+	// cached because see above (GetLatestByUser); cache misses are served by idx_user_project_time
+	projectFilter, isSingleProjectFilter := isSingleProjectFilter(columnMap)
+	cacheKey := srv.latestByProjectCacheKey(user.ID, projectFilter)
+
+	if isSingleProjectFilter && !skipCache {
+		if item := srv.cache.Get(cacheKey); item != nil {
+			srv.cacheLock.RLock()
+			defer srv.cacheLock.RUnlock()
+			return item.Value().(*models.Heartbeat), nil
+		}
+	}
+
+	heartbeat, err := srv.repository.GetLatestByFilters(user, columnMap)
+	if err != nil {
+		return nil, err
+	}
+
+	if isSingleProjectFilter {
+		srv.cacheLock.Lock()
+		defer srv.cacheLock.Unlock()
+		if heartbeat != nil {
+			srv.cache.Set(cacheKey, cloneHeartbeat(heartbeat), ttlcache.DefaultTTL)
+		} else {
+			// cache misses (typed-nil sentinel) as well
+			// the sentinel is treated as time-zero by refreshLatestCacheEntry and hence upgraded automatically once a heartbeat for that project arrives
+			srv.cache.Set(cacheKey, heartbeat, ttlcache.DefaultTTL)
+		}
+	}
+	return heartbeat, nil
 }
 
 func (srv *HeartbeatService) GetFirstAll() ([]*models.TimeByUser, error) {
@@ -201,8 +278,8 @@ func (srv *HeartbeatService) GetLastAll() ([]*models.TimeByUser, error) {
 
 func (srv *HeartbeatService) GetFirstByUser(user *models.User) (time.Time, error) {
 	cacheKey := srv.getUserFirstCacheKey(user.ID)
-	if result, found := srv.cache.Get(cacheKey); found {
-		return result.(time.Time), nil
+	if item := srv.cache.Get(cacheKey); item != nil {
+		return item.Value().(time.Time), nil
 	}
 
 	result, err := srv.repository.GetRangeByUser(user)
@@ -210,14 +287,14 @@ func (srv *HeartbeatService) GetFirstByUser(user *models.User) (time.Time, error
 		return time.Time{}, err
 	}
 
-	srv.cache.Set(cacheKey, result.First.T(), cache.NoExpiration)
+	srv.cache.Set(cacheKey, result.First.T(), ttlcache.NoTTL)
 	return result.First.T(), nil
 }
 
 func (srv *HeartbeatService) GetLastByUser(user *models.User) (time.Time, error) {
 	cacheKey := srv.getUserLastCacheKey(user.ID)
-	if result, found := srv.cache.Get(cacheKey); found {
-		return result.(time.Time), nil
+	if item := srv.cache.Get(cacheKey); item != nil {
+		return item.Value().(time.Time), nil
 	}
 
 	result, err := srv.repository.GetRangeByUser(user)
@@ -225,7 +302,7 @@ func (srv *HeartbeatService) GetLastByUser(user *models.User) (time.Time, error)
 		return time.Time{}, err
 	}
 
-	srv.cache.Set(cacheKey, result.Last.T(), cache.NoExpiration)
+	srv.cache.Set(cacheKey, result.Last.T(), ttlcache.DefaultTTL)
 	return result.Last.T(), nil
 }
 
@@ -235,10 +312,10 @@ func (srv *HeartbeatService) GetRangeByUser(user *models.User) (*models.RangeByU
 
 func (srv *HeartbeatService) GetEntitySetByUser(entityType uint8, userId string) ([]string, error) {
 	cacheKey := srv.getEntityUserCacheKey(entityType, userId)
-	if results, found := srv.cache.Get(cacheKey); found {
-		srv.entityCacheLock.RLock()
-		defer srv.entityCacheLock.RUnlock()
-		return results.(datastructure.Set[string]).Values(), nil
+	if item := srv.cache.Get(cacheKey); item != nil {
+		srv.cacheLock.RLock()
+		defer srv.cacheLock.RUnlock()
+		return item.Value().(datastructure.Set[string]).Values(), nil
 	}
 
 	results, err := srv.repository.GetEntitySetByUser(entityType, userId)
@@ -253,7 +330,7 @@ func (srv *HeartbeatService) GetEntitySetByUser(entityType uint8, userId string)
 		}
 	}
 
-	srv.cache.Set(cacheKey, datastructure.New(filtered...), cache.NoExpiration)
+	srv.cache.Set(cacheKey, datastructure.New(filtered...), ttlcache.DefaultTTL)
 	return filtered, nil
 }
 
@@ -273,17 +350,17 @@ func (srv *HeartbeatService) SearchBranchesByUser(userId, project, query string,
 }
 
 func (srv *HeartbeatService) DeleteBefore(t time.Time) error {
-	go srv.cache.Flush()
+	go srv.flushCaches()
 	return srv.repository.DeleteBefore(t)
 }
 
 func (srv *HeartbeatService) DeleteByUser(user *models.User) error {
-	go srv.cache.Flush()
+	go srv.flushCaches()
 	return srv.repository.DeleteByUser(user)
 }
 
 func (srv *HeartbeatService) DeleteByUserBefore(user *models.User, t time.Time) error {
-	go srv.cache.Flush()
+	go srv.flushCaches()
 	return srv.repository.DeleteByUserBefore(user, t)
 }
 
@@ -335,19 +412,27 @@ func (srv *HeartbeatService) getUserLastCacheKey(userId string) string {
 	return fmt.Sprintf("user_last_%s", userId)
 }
 
+func (srv *HeartbeatService) latestByUserCacheKey(userId string) string {
+	return fmt.Sprintf("latest_heartbeat_user_%s", userId)
+}
+
+func (srv *HeartbeatService) latestByProjectCacheKey(userId, project string) string {
+	return fmt.Sprintf("latest_heartbeat_project_%s_%s", userId, project)
+}
+
 func (srv *HeartbeatService) updateEntityUserCache(entityType uint8, entityKey string, userId string) {
 	cacheKey := srv.getEntityUserCacheKey(entityType, userId)
-	if entities, found := srv.cache.Get(cacheKey); found {
-		entitySet := entities.(datastructure.Set[string])
+	if item := srv.cache.Get(cacheKey); item != nil {
+		entitySet := item.Value().(datastructure.Set[string])
 
-		srv.entityCacheLock.Lock()
-		defer srv.entityCacheLock.Unlock()
+		srv.cacheLock.Lock()
+		defer srv.cacheLock.Unlock()
 
 		if !entitySet.Contain(entityKey) {
 			entitySet.Add(entityKey)
 			// new project / language / ..., which is not yet present in cache, arrived as part of a heartbeats
 			// -> update cache instead of just invalidating it, because rebuilding is expensive here
-			srv.cache.Set(cacheKey, entitySet, cache.NoExpiration)
+			srv.cache.Set(cacheKey, entitySet, ttlcache.NoTTL)
 		}
 	}
 }
@@ -361,6 +446,7 @@ func (srv *HeartbeatService) updateEntityUserCacheByHeartbeat(hb *models.Heartbe
 	go srv.updateEntityUserCache(models.SummaryBranch, hb.Branch, hb.UserID)
 	go srv.updateEntityUserCache(models.SummaryEntity, hb.Entity, hb.UserID)
 	go srv.updateEntityUserCache(models.SummaryCategory, hb.Category, hb.UserID)
+	go srv.updateEntityUserCache(models.SummaryAiModel, hb.AIModel, hb.UserID)
 }
 
 func (srv *HeartbeatService) notifyBatch(heartbeats []*models.Heartbeat) {
@@ -370,6 +456,11 @@ func (srv *HeartbeatService) notifyBatch(heartbeats []*models.Heartbeat) {
 			Fields: map[string]interface{}{config.FieldPayload: hb},
 		})
 	}
+}
+
+func (srv *HeartbeatService) flushCaches() {
+	srv.cache.DeleteAll()
+	srv.countCache.DeleteAll()
 }
 
 func (srv *HeartbeatService) countByUserCacheKey(userId string) string {
@@ -398,13 +489,49 @@ func (srv *HeartbeatService) filtersToColumnMap(filters *models.Filters) map[str
 func (srv *HeartbeatService) checkInvalidateRangeCache(newHeartbeat *models.Heartbeat) {
 	keyFirst, keyLast := srv.getUserFirstCacheKey(newHeartbeat.UserID), srv.getUserLastCacheKey(newHeartbeat.UserID)
 
-	first, found := srv.cache.Get(keyFirst)
-	if found && newHeartbeat.Time.T().Before(first.(time.Time)) {
+	if item := srv.cache.Get(keyFirst); item != nil && newHeartbeat.Time.T().Before(item.Value().(time.Time)) {
 		srv.cache.Delete(keyFirst)
 	}
 
-	last, found := srv.cache.Get(keyLast)
-	if found && newHeartbeat.Time.T().After(last.(time.Time)) {
+	if item := srv.cache.Get(keyLast); item != nil && newHeartbeat.Time.T().After(item.Value().(time.Time)) {
 		srv.cache.Delete(keyLast)
 	}
+}
+
+// updateLatestHeartbeatCache keeps the latest heartbeat-cache entries along the user and (user, project) dimensions up to date, analogous to how checkInvalidateRangeCache
+// like updateEntityUserCache, it only refreshes entries that are already populated, rather than eagerly creating one for every heartbeat seen
+func (srv *HeartbeatService) updateLatestHeartbeatCache(newHeartbeat *models.Heartbeat) {
+	srv.refreshLatestCacheEntry(srv.latestByUserCacheKey(newHeartbeat.UserID), newHeartbeat)
+	srv.refreshLatestCacheEntry(srv.latestByProjectCacheKey(newHeartbeat.UserID, newHeartbeat.Project), newHeartbeat)
+}
+
+func (srv *HeartbeatService) refreshLatestCacheEntry(key string, newHeartbeat *models.Heartbeat) {
+	srv.cacheLock.Lock() // write lock throughout, as this is a read-modify-write operation
+	defer srv.cacheLock.Unlock()
+
+	item := srv.cache.Get(key)
+	if item == nil {
+		return // intentionally don't pre-fill cache from incoming heartbeats, because we can't be sure there are no newer ones in the databaes
+	}
+	// a cached nil pointer (or zero-value struct) indicates "known to have no heartbeats" and is effectively time-zero, i.e. always replaced
+	if latest, ok := item.Value().(*models.Heartbeat); ok && (latest == nil || newHeartbeat.Time.T().After(latest.Time.T())) {
+		srv.cache.Set(key, cloneHeartbeat(newHeartbeat), ttlcache.DefaultTTL)
+	}
+}
+
+// isSingleProjectFilter tells whether the given repository filter map consists of exactly one entry, which is a single project value
+func isSingleProjectFilter(columnMap map[string][]string) (string, bool) {
+	if len(columnMap) != 1 {
+		return "", false
+	}
+	values, isProject := columnMap[models.GetEntityColumn(models.SummaryProject)]
+	if !isProject || len(values) != 1 {
+		return "", false
+	}
+	return values[0], true
+}
+
+func cloneHeartbeat(heartbeat *models.Heartbeat) *models.Heartbeat {
+	clone := *heartbeat
+	return &clone
 }

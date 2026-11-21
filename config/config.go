@@ -18,8 +18,8 @@ import (
 	"encoding/gob"
 	"log/slog"
 	"net/url"
+	"uuid"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/gorilla/securecookie"
 	"github.com/jinzhu/configor"
 	"github.com/muety/wakapi/data"
@@ -139,20 +139,19 @@ type securityConfig struct {
 	EnableProxy      bool `yaml:"enable_proxy" default:"false" env:"WAKAPI_ENABLE_PROXY"` // only intended for production instance at wakapi.dev
 	DisableFrontpage bool `yaml:"disable_frontpage" default:"false" env:"WAKAPI_DISABLE_FRONTPAGE"`
 	// this is actually a pepper (https://en.wikipedia.org/wiki/Pepper_(cryptography))
-	PasswordSalt                 string                     `yaml:"password_salt" default:"" env:"WAKAPI_PASSWORD_SALT"`
-	InsecureCookies              bool                       `yaml:"insecure_cookies" default:"false" env:"WAKAPI_INSECURE_COOKIES"`
-	CookieMaxAgeSec              int                        `yaml:"cookie_max_age" default:"172800" env:"WAKAPI_COOKIE_MAX_AGE"`
-	TrustedHeaderAuth            bool                       `yaml:"trusted_header_auth" default:"false" env:"WAKAPI_TRUSTED_HEADER_AUTH"`
-	TrustedHeaderAuthKey         string                     `yaml:"trusted_header_auth_key" default:"Remote-User" env:"WAKAPI_TRUSTED_HEADER_AUTH_KEY"`
-	TrustedHeaderAuthAllowSignup bool                       `yaml:"trusted_header_auth_allow_signup" default:"false" env:"WAKAPI_TRUSTED_HEADER_AUTH_ALLOW_SIGNUP"`
-	TrustReverseProxyIps         string                     `yaml:"trust_reverse_proxy_ips" default:"" env:"WAKAPI_TRUST_REVERSE_PROXY_IPS"` // comma-separated list of trusted reverse proxy ips
-	SignupMaxRate                string                     `yaml:"signup_max_rate" default:"5/1h" env:"WAKAPI_SIGNUP_MAX_RATE"`
-	LoginMaxRate                 string                     `yaml:"login_max_rate" default:"10/1m" env:"WAKAPI_LOGIN_MAX_RATE"`
-	PasswordResetMaxRate         string                     `yaml:"password_reset_max_rate" default:"5/1h" env:"WAKAPI_PASSWORD_RESET_MAX_RATE"`
-	SecureCookie                 *securecookie.SecureCookie `yaml:"-"`
-	SessionKey                   string                     `yaml:"session_key" default:"" env:"WAKAPI_SESSION_KEY"` // base64 encoded key, used to encrypt sessions
-	SessionKeyBytes              []byte                     `yaml:"-"`
-	OidcProviders                []oidcProviderConfig       `yaml:"oidc"`
+	PasswordSalt                 string               `yaml:"password_salt" default:"" env:"WAKAPI_PASSWORD_SALT"`
+	InsecureCookies              bool                 `yaml:"insecure_cookies" default:"false" env:"WAKAPI_INSECURE_COOKIES"`
+	CookieMaxAgeSec              int                  `yaml:"cookie_max_age" default:"172800" env:"WAKAPI_COOKIE_MAX_AGE"`
+	TrustedHeaderAuth            bool                 `yaml:"trusted_header_auth" default:"false" env:"WAKAPI_TRUSTED_HEADER_AUTH"`
+	TrustedHeaderAuthKey         string               `yaml:"trusted_header_auth_key" default:"Remote-User" env:"WAKAPI_TRUSTED_HEADER_AUTH_KEY"`
+	TrustedHeaderAuthAllowSignup bool                 `yaml:"trusted_header_auth_allow_signup" default:"false" env:"WAKAPI_TRUSTED_HEADER_AUTH_ALLOW_SIGNUP"`
+	TrustReverseProxyIps         string               `yaml:"trust_reverse_proxy_ips" default:"" env:"WAKAPI_TRUST_REVERSE_PROXY_IPS"` // comma-separated list of trusted reverse proxy ips
+	SignupMaxRate                string               `yaml:"signup_max_rate" default:"5/1h" env:"WAKAPI_SIGNUP_MAX_RATE"`
+	LoginMaxRate                 string               `yaml:"login_max_rate" default:"10/1m" env:"WAKAPI_LOGIN_MAX_RATE"`
+	PasswordResetMaxRate         string               `yaml:"password_reset_max_rate" default:"5/1h" env:"WAKAPI_PASSWORD_RESET_MAX_RATE"`
+	CookieKey                    string               `yaml:"cookie_key" default:"" env:"WAKAPI_COOKIE_KEY"` // base64 encoded key, used to derive session and authentication keys
+	CookieKeyBytes               []byte               `yaml:"-"`
+	OidcProviders                []oidcProviderConfig `yaml:"oidc"`
 	trustReverseProxyIpsParsed   []net.IPNet
 }
 
@@ -294,7 +293,7 @@ func (c *Config) createCookie(name, value, path string, maxAge int) *http.Cookie
 		path = "/"
 	}
 
-	return &http.Cookie{
+	cookie := &http.Cookie{
 		Name:     name,
 		Value:    value,
 		Path:     path,
@@ -303,6 +302,14 @@ func (c *Config) createCookie(name, value, path string, maxAge int) *http.Cookie
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 	}
+
+	if maxAge > 0 {
+		cookie.Expires = time.Now().Add(time.Duration(maxAge) * time.Second)
+	} else if maxAge < 0 {
+		cookie.Expires = time.Unix(0, 0)
+	}
+
+	return cookie
 }
 
 func (c *Config) IsDev() bool {
@@ -540,15 +547,7 @@ func IsDev(env string) bool {
 }
 
 func readColors() map[string]map[string]string {
-	// Read language colors
-	// Source:
-	// - https://raw.githubusercontent.com/ozh/github-colors/master/colors.json
-	// - https://wakatime.com/colors/operating_systems
-	// - https://wakatime.com/colors/editors
-	// Extracted from Wakatime website with XPath (see below) and did a bit of regex magic after.
-	// - $x('//span[@class="editor-icon tip"]/@data-original-title').map(e => e.nodeValue)
-	// - $x('//span[@class="editor-icon tip"]/div[1]/text()').map(e => e.nodeValue)
-
+	// see scripts/convert_colors.py
 	raw := data.ColorsFile
 	if IsDev(env) {
 		if _, err := os.Stat(colorsFile); err == nil {
@@ -566,7 +565,7 @@ func readColors() map[string]map[string]string {
 	return colors
 }
 
-func resolveDbDialect(dbType string) string {
+func ResolveDbDialect(dbType string) string {
 	if dbType == "cockroach" {
 		return "postgres"
 	}
@@ -584,6 +583,9 @@ func Set(config *Config) {
 }
 
 func Get() *Config {
+	if cfg == nil {
+		cfg = Empty()
+	}
 	return cfg
 }
 
@@ -606,9 +608,9 @@ func Load(configFlag string, version string) *Config {
 		config.Version = "v" + config.Version
 	}
 
-	config.InstanceId = uuid.Must(uuid.NewV4()).String()
+	config.InstanceId = uuid.NewV4().String()
 	config.App.Colors = readColors()
-	config.Db.Dialect = resolveDbDialect(config.Db.Type)
+	config.Db.Dialect = ResolveDbDialect(config.Db.Type)
 	if config.Db.Type == "cockroach" {
 		slog.Warn("cockroach is not officially supported, it is strongly recommended to migrate to postgres instead")
 	}
@@ -617,29 +619,20 @@ func Load(configFlag string, version string) *Config {
 		os.Exit(1)
 	}
 
-	hashKey := securecookie.GenerateRandomKey(64)
-	blockKey := securecookie.GenerateRandomKey(32)
-
-	sessionKey := make([]byte, base64.StdEncoding.DecodedLen(len(config.Security.SessionKey)))
-	sessionKeyLen, err := base64.StdEncoding.Decode(sessionKey, []byte(config.Security.SessionKey))
-	if err != nil || sessionKeyLen < 32 {
-		if config.Security.SessionKey != "" {
-			slog.Warn("⚠️ Failed to decode session key, generating a random one")
-		}
-		sessionKey = securecookie.GenerateRandomKey(32)
+	cookieKey, err := base64.StdEncoding.DecodeString(config.Security.CookieKey)
+	if err != nil {
+		slog.Warn("⚠️ Failed to decode cookie key, generating a random one")
+		cookieKey = securecookie.GenerateRandomKey(128)
 	}
-	config.Security.SessionKeyBytes = sessionKey[:32]
-
-	if IsDev(env) {
-		slog.Warn("⚠️ using temporary keys to sign and encrypt cookies in dev mode, make sure to set env to production for real-world use")
-		hashKey, blockKey = getTemporarySecureKeys()
-		blockKey = hashKey
+	if len(cookieKey) == 0 {
+		// No cookie key provided, lets generate a random one
+		cookieKey = securecookie.GenerateRandomKey(128)
 	}
-	if config.Security.InsecureCookies {
-		slog.Warn("⚠️ it is strongly advised NOT to use insecure cookies, are you sure about this setting?")
+	if len(cookieKey) < 32 {
+		slog.Warn("⚠️ Cookie key is too short, it is recommended to use at least 32 bytes for security reasons")
 	}
+	config.Security.CookieKeyBytes = cookieKey
 
-	config.Security.SecureCookie = securecookie.New(hashKey, blockKey)
 	config.Security.ParseTrustReverseProxyIPs()
 
 	config.Server.BasePath = strings.TrimSuffix(config.Server.BasePath, "/")
@@ -750,6 +743,7 @@ func Load(configFlag string, version string) *Config {
 	// post config-load tasks
 	initOpenIDConnect(config)
 	InitWebAuthn(config)
+	InitializeCookies()
 
 	return Get()
 }
@@ -773,6 +767,12 @@ func BeginningOfWakatime() time.Time {
 
 func initOpenIDConnect(config *Config) {
 	// openid connect
+	for i := range config.Security.OidcProviders {
+		if name := strings.ToLower(config.Security.OidcProviders[i].Name); name != config.Security.OidcProviders[i].Name {
+			slog.Warn("oidc provider name is not lowercase, normalizing it", "provider", config.Security.OidcProviders[i].Name, "normalized", name)
+			config.Security.OidcProviders[i].Name = name
+		}
+	}
 	for _, c := range config.Security.OidcProviders {
 		RegisterOidcProvider(&c)
 		slog.Info("registered openid connect provider", "provider", c.Name)
@@ -780,6 +780,11 @@ func initOpenIDConnect(config *Config) {
 }
 
 func InitWebAuthn(config *Config) {
+	if config.Security.DisableWebAuthn {
+		slog.Info("webauthn is disabled, skipping initialization")
+		return
+	}
+
 	gob.Register(&webauthn.SessionData{})
 
 	parsedURL, err := url.Parse(config.Server.PublicUrl)

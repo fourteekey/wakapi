@@ -23,6 +23,7 @@ const (
 	SummaryBranch   uint8 = 6
 	SummaryEntity   uint8 = 7
 	SummaryCategory uint8 = 8
+	SummaryAiModel  uint8 = 9
 )
 
 const UnknownSummaryKey = "unknown"
@@ -60,7 +61,7 @@ type SummaryItems []*SummaryItem
 type SummaryItem struct {
 	ID        uint64        `json:"-" gorm:"primary_key"`
 	Summary   *Summary      `json:"-" gorm:"not null; constraint:OnUpdate:CASCADE,OnDelete:CASCADE"`
-	SummaryID uint          `json:"-" gorm:"size:32"`
+	SummaryID uint          `json:"-" gorm:"size:32;index:idx_summary_item_summary"`
 	Type      uint8         `json:"-" gorm:"index:idx_type"`
 	Key       string        `json:"key" gorm:"size:255"`
 	Total     time.Duration `json:"total" swaggertype:"primitive,integer"`
@@ -445,8 +446,9 @@ func (s *SummaryParams) HasFilters() bool {
 	return s.Filters != nil && !s.Filters.IsEmpty()
 }
 
+// IsProjectDetails indicates whether the summary parameters request a project details view.
 func (s *SummaryParams) IsProjectDetails() bool {
-	if !s.HasFilters() {
+	if !s.HasFilters() || s.Filters.SelectFilteredOnly {
 		return false
 	}
 	// a project-details view is scoped to a single project; a branch filter is allowed as a

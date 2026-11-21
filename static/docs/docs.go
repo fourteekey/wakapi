@@ -1122,6 +1122,9 @@ const docTemplate = `{
         "models.Heartbeat": {
             "type": "object",
             "properties": {
+                "ai_cached_input_tokens": {
+                    "type": "integer"
+                },
                 "ai_input_tokens": {
                     "type": "integer"
                 },
@@ -1361,6 +1364,9 @@ const docTemplate = `{
         "v1.HeartbeatEntry": {
             "type": "object",
             "properties": {
+                "ai_cached_input_tokens": {
+                    "type": "integer"
+                },
                 "ai_input_tokens": {
                     "type": "integer"
                 },

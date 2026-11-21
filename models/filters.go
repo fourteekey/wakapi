@@ -18,6 +18,7 @@ type Filters struct {
 	Branch                   OrFilter
 	Entity                   OrFilter
 	Category                 OrFilter
+	AIModel                  OrFilter
 	SelectFilteredOnly       bool // flag indicating to drop all Entity types from a summary except the single one filtered by
 	hasResolvedProjectLabels bool
 	hasResolvedAliases       bool
@@ -86,6 +87,8 @@ func (f *Filters) WithMultiple(entity uint8, keys []string) *Filters {
 		f.Entity = append(f.Entity, keys...)
 	case SummaryCategory:
 		f.Category = append(f.Category, keys...)
+	case SummaryAiModel:
+		f.AIModel = append(f.AIModel, keys...)
 	}
 	return f
 }
@@ -109,6 +112,8 @@ func (f *Filters) One() (bool, uint8, OrFilter) {
 		return true, SummaryEntity, f.Entity
 	} else if f.Category != nil && f.Category.Exists() {
 		return true, SummaryCategory, f.Category
+	} else if f.AIModel != nil && f.AIModel.Exists() {
+		return true, SummaryAiModel, f.AIModel
 	}
 	return false, 0, OrFilter{}
 }
@@ -127,7 +132,7 @@ func (f *Filters) IsEmpty() bool {
 
 func (f *Filters) Count() int {
 	var count int
-	for i := SummaryProject; i <= SummaryEntity; i++ {
+	for _, i := range SummaryTypes() {
 		count += f.CountByType(i)
 	}
 	return count
@@ -135,9 +140,9 @@ func (f *Filters) Count() int {
 
 func (f *Filters) CountDistinctTypes() int {
 	var count int
-	for i := SummaryProject; i <= SummaryEntity; i++ {
+	for _, i := range SummaryTypes() {
 		if f.CountByType(i) > 0 {
-			count += f.CountByType(i)
+			count++
 		}
 	}
 	return count
@@ -156,7 +161,7 @@ func (f *Filters) CountAliasesByType(entity uint8) int {
 
 func (f *Filters) EntityCount() int {
 	var count int
-	for i := SummaryProject; i <= SummaryEntity; i++ {
+	for _, i := range SummaryTypes() {
 		if c := f.CountByType(i); c > 0 {
 			count++
 		}
@@ -184,6 +189,8 @@ func (f *Filters) ResolveType(entityId uint8) *OrFilter {
 		return &f.Entity
 	case SummaryCategory:
 		return &f.Category
+	case SummaryAiModel:
+		return &f.AIModel
 	default:
 		return &OrFilter{}
 	}
@@ -203,7 +210,8 @@ func (f *Filters) MatchHeartbeat(h *Heartbeat) bool {
 		(f.Language == nil || f.Language.MatchAny(h.Language)) &&
 		(f.Editor == nil || f.Editor.MatchAny(h.Editor)) &&
 		(f.Machine == nil || f.Machine.MatchAny(h.Machine)) &&
-		(f.Category == nil || f.Machine.MatchAny(h.Category))
+		(f.Category == nil || f.Category.MatchAny(h.Category)) &&
+		(f.AIModel == nil || f.AIModel.MatchAny(h.AIModel))
 }
 
 func (f *Filters) MatchDuration(d *Duration) bool {
@@ -213,7 +221,8 @@ func (f *Filters) MatchDuration(d *Duration) bool {
 		(f.Editor == nil || f.Editor.MatchAny(d.Editor)) &&
 		(f.Machine == nil || f.Machine.MatchAny(d.Machine)) &&
 		(f.Branch == nil || f.Branch.MatchAny(d.Branch)) &&
-		(f.Category == nil || f.Category.MatchAny(d.Category))
+		(f.Category == nil || f.Category.MatchAny(d.Category)) &&
+		(f.AIModel == nil || f.AIModel.MatchAny(d.AIModel))
 }
 
 // WithAliases adds OR-conditions for every alias of a Filter key as additional Filter keys
@@ -289,6 +298,15 @@ func (f *Filters) WithAliases(resolve AliasReverseResolver) *Filters {
 		f.aliasCount[SummaryCategory] = len(updated) - len(f.Category)
 		f.Category = updated
 	}
+	if f.AIModel != nil {
+		updated := OrFilter(make([]string, 0, len(f.AIModel)))
+		for _, e := range f.AIModel {
+			updated = append(updated, e)
+			updated = append(updated, resolve(SummaryAiModel, e)...)
+		}
+		f.aliasCount[SummaryAiModel] = len(updated) - len(f.AIModel)
+		f.AIModel = updated
+	}
 	// no aliases for entities / files
 
 	f.hasResolvedAliases = true
@@ -306,6 +324,8 @@ func (f *Filters) WithProjectLabels(resolve ProjectLabelReverseResolver) *Filter
 	return f
 }
 
+// IsProjectDetails indicates whether the filters request a project details view (which requires fine-grained entity and branch breakdowns).
+// If SelectFilteredOnly is true (e.g. badge requests or all-time project summary API calls), the caller only requires the aggregated total for the project and drops other entity types, so no actual entity-level breakdown is required.
 func (f *Filters) IsProjectDetails() bool {
-	return f != nil && f.Project != nil && f.Project.Exists()
+	return f != nil && !f.SelectFilteredOnly && f.Project != nil && f.Project.Exists()
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jellydator/ttlcache/v3"
 	"github.com/leandro-lugaresi/hub"
 	"github.com/muety/wakapi/config"
 	"github.com/muety/wakapi/mocks"
@@ -721,7 +722,11 @@ func (suite *SummaryServiceTestSuite) TestSummaryService_HeartbeatCreateEvent_Cl
 	}
 
 	suite.SummaryRepository.On("GetLastBySingleUser", TestUserId).Return(latestSummaryTime, nil).Once()
-	suite.SummaryRepository.On("DeleteByUserAfter", TestUserId, historicalHeartbeatTime).Return(nil).Once()
+	deleted := make(chan time.Time, 1)
+	suite.SummaryRepository.On("DeleteByUserAfter", TestUserId, historicalHeartbeatTime).Return(nil).Once().Run(func(args mock.Arguments) {
+		// the listener runs in its own goroutine, so signal via channel instead of polling mock.Calls, which would race with the mock's internal bookkeeping
+		deleted <- args.Get(1).(time.Time)
+	})
 
 	eventBus.Publish(hub.Message{
 		Name: config.EventHeartbeatCreate,
@@ -730,14 +735,7 @@ func (suite *SummaryServiceTestSuite) TestSummaryService_HeartbeatCreateEvent_Cl
 		},
 	})
 
-	assert.Eventually(suite.T(), func() bool {
-		for _, call := range suite.SummaryRepository.Calls {
-			if call.Method == "DeleteByUserAfter" {
-				return true
-			}
-		}
-		return false
-	}, 2*time.Second, 20*time.Millisecond)
+	suite.awaitDeleted(deleted, historicalHeartbeatTime)
 
 	suite.SummaryRepository.AssertExpectations(suite.T())
 	_ = sut
@@ -765,14 +763,9 @@ func (suite *SummaryServiceTestSuite) TestSummaryService_HeartbeatCreateEvent_Ke
 		},
 	})
 
-	assert.Eventually(suite.T(), func() bool {
-		for _, call := range suite.SummaryRepository.Calls {
-			if call.Method == "GetLastBySingleUser" {
-				return true
-			}
-		}
-		return false
-	}, 2*time.Second, 20*time.Millisecond)
+	// the heartbeat cache is written last within the listener, so it doubles as a barrier for "event fully processed"
+	// go-cache is internally synchronized, so polling it from the test is safe
+	suite.awaitProcessedHeartbeat(sut, recentHeartbeatTime)
 
 	suite.SummaryRepository.AssertNotCalled(suite.T(), "DeleteByUserAfter", mock.Anything, mock.Anything)
 	_ = sut
@@ -803,14 +796,7 @@ func (suite *SummaryServiceTestSuite) TestSummaryService_HeartbeatCreateEvent_Sk
 		},
 	})
 
-	assert.Eventually(suite.T(), func() bool {
-		for _, call := range suite.SummaryRepository.Calls {
-			if call.Method == "GetLastBySingleUser" {
-				return true
-			}
-		}
-		return false
-	}, 2*time.Second, 20*time.Millisecond)
+	suite.awaitProcessedHeartbeat(sut, now)
 
 	eventBus.Publish(hub.Message{
 		Name: config.EventHeartbeatCreate,
@@ -819,11 +805,152 @@ func (suite *SummaryServiceTestSuite) TestSummaryService_HeartbeatCreateEvent_Sk
 		},
 	})
 
-	time.Sleep(100 * time.Millisecond) // give the subscriber a moment to potentially process the second message
+	// wait for the second event to be fully processed instead of sleeping, so that the "not called" assertions below are deterministic (and race-free)
+	suite.awaitProcessedHeartbeat(sut, now.Add(1*time.Minute))
 
 	suite.SummaryRepository.AssertNumberOfCalls(suite.T(), "GetLastBySingleUser", 1)
 	suite.SummaryRepository.AssertNotCalled(suite.T(), "DeleteByUserAfter", mock.Anything, mock.Anything)
 	_ = sut
+}
+
+func (suite *SummaryServiceTestSuite) awaitDeleted(deleted chan time.Time, expected time.Time) {
+	suite.T().Helper()
+	select {
+	case actual := <-deleted:
+		assert.Equal(suite.T(), expected, actual)
+	case <-time.After(2 * time.Second):
+		suite.T().Fatalf("timed out waiting for summaries to be deleted after %v", expected)
+	}
+}
+
+// awaitProcessedHeartbeat waits until the listener finished handling an event with the given timestamp.
+// The heartbeat cache is the last thing written in the listener, and ttlcache is internally synchronized.
+func (suite *SummaryServiceTestSuite) awaitProcessedHeartbeat(sut *SummaryService, expected time.Time) {
+	suite.T().Helper()
+	assert.Eventually(suite.T(), func() bool {
+		item := sut.heartbeatCache.Get("latest_heartbeat_" + TestUserId)
+		return item != nil && item.Value().Equal(expected)
+	}, 2*time.Second, 20*time.Millisecond)
+}
+
+func (suite *SummaryServiceTestSuite) TestSummaryService_Aliased_CacheRetrievalAndEviction_TopicAlias() {
+	sut, eventBus := suite.createSut()
+
+	from := time.Unix(1000, 0)
+	to := time.Unix(2000, 0)
+
+	suite.DurationService.On("Get", from, to, suite.TestUser, mock.Anything, mock.Anything, false).
+		Return(models.Durations{}, nil).Twice()
+	suite.AliasService.On("InitializeUser", suite.TestUser.ID).Return(nil)
+	suite.ProjectLabelService.On("GetByUser", suite.TestUser.ID).Return([]*models.ProjectLabel{}, nil)
+
+	// 1. First retrieval -> cache miss, durationService.Get called
+	s1, err := sut.Aliased(from, to, suite.TestUser, sut.Summarize, nil, nil, false)
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), s1)
+	suite.DurationService.AssertNumberOfCalls(suite.T(), "Get", 1)
+
+	// 2. Second retrieval -> cache hit, durationService.Get not called again
+	s2, err := sut.Aliased(from, to, suite.TestUser, sut.Summarize, nil, nil, false)
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), s2)
+	suite.DurationService.AssertNumberOfCalls(suite.T(), "Get", 1)
+
+	// 3. Evict cache via TopicAlias event
+	eventBus.Publish(hub.Message{
+		Name: config.TopicAlias,
+		Fields: map[string]interface{}{
+			config.FieldUserId: suite.TestUser.ID,
+		},
+	})
+	time.Sleep(50 * time.Millisecond) // wait for subscriber to process event
+
+	// 4. Third retrieval -> cache evicted, durationService.Get called again
+	s3, err := sut.Aliased(from, to, suite.TestUser, sut.Summarize, nil, nil, false)
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), s3)
+	suite.DurationService.AssertNumberOfCalls(suite.T(), "Get", 2)
+}
+
+func (suite *SummaryServiceTestSuite) TestSummaryService_Aliased_CacheEviction_TopicProjectLabel() {
+	sut, eventBus := suite.createSut()
+
+	from := time.Unix(3000, 0)
+	to := time.Unix(4000, 0)
+
+	suite.DurationService.On("Get", from, to, suite.TestUser, mock.Anything, mock.Anything, false).
+		Return(models.Durations{}, nil).Twice()
+	suite.AliasService.On("InitializeUser", suite.TestUser.ID).Return(nil)
+	suite.ProjectLabelService.On("GetByUser", suite.TestUser.ID).Return([]*models.ProjectLabel{}, nil)
+
+	// 1. First retrieval -> cache miss
+	s1, err := sut.Aliased(from, to, suite.TestUser, sut.Summarize, nil, nil, false)
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), s1)
+	suite.DurationService.AssertNumberOfCalls(suite.T(), "Get", 1)
+
+	// 2. Second retrieval -> cache hit
+	s2, err := sut.Aliased(from, to, suite.TestUser, sut.Summarize, nil, nil, false)
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), s2)
+	suite.DurationService.AssertNumberOfCalls(suite.T(), "Get", 1)
+
+	// 3. Evict cache via TopicProjectLabel event
+	eventBus.Publish(hub.Message{
+		Name: config.TopicProjectLabel,
+		Fields: map[string]interface{}{
+			config.FieldUserId: suite.TestUser.ID,
+		},
+	})
+	time.Sleep(50 * time.Millisecond) // wait for subscriber to process event
+
+	// 4. Third retrieval -> cache evicted, durationService.Get called again
+	s3, err := sut.Aliased(from, to, suite.TestUser, sut.Summarize, nil, nil, false)
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), s3)
+	suite.DurationService.AssertNumberOfCalls(suite.T(), "Get", 2)
+}
+
+func (suite *SummaryServiceTestSuite) TestSummaryService_Aliased_CacheTTLEviction() {
+	sut, _ := suite.createSut()
+
+	// Replace cache with short TTL
+	shortCache := ttlcache.New[string, *models.Summary](
+		ttlcache.WithTTL[string, *models.Summary](50*time.Millisecond),
+		ttlcache.WithDisableTouchOnHit[string, *models.Summary](),
+	)
+	go shortCache.Start()
+	defer shortCache.Stop()
+	sut.cache = shortCache
+
+	from := time.Unix(5000, 0)
+	to := time.Unix(6000, 0)
+
+	suite.DurationService.On("Get", from, to, suite.TestUser, mock.Anything, mock.Anything, false).
+		Return(models.Durations{}, nil).Twice()
+	suite.AliasService.On("InitializeUser", suite.TestUser.ID).Return(nil)
+	suite.ProjectLabelService.On("GetByUser", suite.TestUser.ID).Return([]*models.ProjectLabel{}, nil)
+
+	// 1. Initial retrieval -> cache miss
+	s1, err := sut.Aliased(from, to, suite.TestUser, sut.Summarize, nil, nil, false)
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), s1)
+	suite.DurationService.AssertNumberOfCalls(suite.T(), "Get", 1)
+
+	// 2. Immediate retrieval -> cache hit
+	s2, err := sut.Aliased(from, to, suite.TestUser, sut.Summarize, nil, nil, false)
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), s2)
+	suite.DurationService.AssertNumberOfCalls(suite.T(), "Get", 1)
+
+	// 3. Wait for TTL to expire
+	time.Sleep(100 * time.Millisecond)
+
+	// 4. Retrieval after TTL -> cache expired, durationService.Get called again
+	s3, err := sut.Aliased(from, to, suite.TestUser, sut.Summarize, nil, nil, false)
+	assert.Nil(suite.T(), err)
+	assert.NotNil(suite.T(), s3)
+	suite.DurationService.AssertNumberOfCalls(suite.T(), "Get", 2)
 }
 
 func (suite *SummaryServiceTestSuite) createSut() (*SummaryService, *hub.Hub) {

@@ -90,7 +90,7 @@ func (r *DurationRepository) GetLatestByUser(user *models.User) (*models.Duratio
 }
 
 func (r *DurationRepository) InsertBatch(durations []*models.Duration) error {
-	return InsertBatchChunked[*models.Duration](durations, &models.Duration{}, r.db)
+	return InsertBatchChunked[*models.Duration](durations, &models.Duration{}, r.db, true)
 }
 
 func (r *DurationRepository) DeleteByUser(user *models.User) error {
@@ -111,30 +111,41 @@ func (r *DurationRepository) DeleteByUserBefore(user *models.User, t time.Time) 
 	return nil
 }
 
-func (r *DurationRepository) queryAddTimeFilterBetween(q *gorm.DB, from, to time.Time) *gorm.DB {
-	if r.config.Db.IsSQLite() {
-		q = q.
-			Where("time_real >= julianday(?)", from.Local()).
-			Where("time_real < julianday(?)", to.Local())
-	} else {
-		q = q.
-			Where("time >= ?", from.Local()).
-			Where("time < ?", to.Local())
+func (r *DurationRepository) DeleteByUserAfter(user *models.User, t time.Time) error {
+	q := r.db.Model(models.Duration{}).
+		Where("user_id = ?", user.ID).
+		// we do this just to narrow down the amount of data, since the DATE_ADD() / arithmetic expression prevents from using the index and thus results in a full scan
+		// we optimistically assume that a duration is never longer than 12 hours, which is a safe assumption
+		Where("time >= ?", models.CustomTime(t.Add(-12*time.Hour).Local()))
+	q = r.queryAddTimeFilterGreaterEqual(q, t.Local())
+	if err := q.Delete(models.Duration{}).Error; err != nil {
+		return err
 	}
-	return q
+	return nil
+}
+
+func (r *DurationRepository) queryAddTimeFilterBetween(q *gorm.DB, from, to time.Time) *gorm.DB {
+	return q.
+		Where("time >= ?", models.CustomTime(from.Local())).
+		Where("time < ?", models.CustomTime(to.Local()))
 }
 
 func (r *DurationRepository) queryAddTimeFilterLessEqual(q *gorm.DB, t time.Time) *gorm.DB {
-	if r.config.Db.IsSQLite() {
-		return q.Where("time_real <= julianday(?)", t.Local())
+	return q.Where("time <= ?", models.CustomTime(t.Local()))
+}
+
+func (r *DurationRepository) queryAddTimeFilterGreaterEqual(q *gorm.DB, t time.Time) *gorm.DB {
+	switch r.GetDialector() {
+	case conf.SQLDialectMysql:
+		return q.Where("DATE_ADD(`time`, INTERVAL (`duration` DIV 1000) MICROSECOND) >= ?", models.CustomTime(t.Local())) // nanoseconds to microseconds
+	case conf.SQLDialectPostgres:
+		return q.Where("time + (duration / 1000000000.0 * interval '1 second') >= ?", models.CustomTime(t.Local())) // nanoseconds to seconds
+	default: // sqlite
+		return q.Where("time + (duration / 1000000) >= ?", t.Local().UnixMilli()) // nanoseconds to milliseconds
 	}
-	return q.Where("time <= ?", t.Local())
 }
 
 func (r *DurationRepository) queryAddTimeSorting(q *gorm.DB, desc bool) *gorm.DB {
 	order := condition.Ternary(desc, "desc", "asc")
-	if r.config.Db.IsSQLite() {
-		return q.Order("time_real " + order)
-	}
 	return q.Order("time " + order)
 }

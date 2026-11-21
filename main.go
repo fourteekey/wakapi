@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/duke-git/lancet/v2/condition"
+	"github.com/duke-git/lancet/v2/slice"
 	_ "github.com/glebarez/sqlite"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -198,7 +199,7 @@ func main() {
 	reportService = services.NewReportService(summaryService, userService, mailService)
 	activityService = services.NewActivityService(summaryService)
 	diagnosticsService = services.NewDiagnosticsService(diagnosticsRepository)
-	housekeepingService = services.NewHousekeepingService(userService, heartbeatService, projectService, summaryService, aliasRepository) // can pass any repo here
+	housekeepingService = services.NewHousekeepingService(userService, heartbeatService, durationService, projectService, summaryService, aliasRepository) // can pass any repo here
 	miscService = services.NewMiscService(userService, heartbeatService, summaryService, keyValueService, mailService)
 	webAuthnService = services.NewWebAuthnService(webAuthnRepository)
 
@@ -257,6 +258,17 @@ func main() {
 
 	// Setup Routing
 	router := chi.NewRouter()
+
+	trustedProxies := config.Security.TrustReverseProxyIPs()
+	if len(trustedProxies) > 0 {
+		cidrs := slice.Map[net.IPNet, string](trustedProxies, func(_ int, ipNet net.IPNet) string {
+			return ipNet.String()
+		})
+		router.Use(middleware.ClientIPFromXFF(cidrs...))
+	} else {
+		router.Use(middleware.ClientIPFromRemoteAddr)
+	}
+
 	router.Use(
 		middleware.CleanPath,
 		middleware.StripSlashes,

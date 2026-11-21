@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"uuid"
 
 	"github.com/descope/virtualwebauthn"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/gofrs/uuid/v5"
 	"github.com/gorilla/securecookie"
 	"github.com/muety/wakapi/config"
 	"github.com/muety/wakapi/middlewares"
@@ -169,6 +169,27 @@ func (suite *WebAuthnTestSuite) TestWebauthn_RegisterDeniedForNonLocalUsers() {
 
 	suite.Contains(string(body), "webauthn is only available for local users")
 	suite.Equal(http.StatusBadRequest, res.StatusCode)
+}
+
+func (suite *WebAuthnTestSuite) TestWebauthn_OptionsDeniedWhenDisabled() {
+	cookies := suite.loginAsUser(suite.UserA)
+
+	config.Get().Security.DisableWebAuthn = true
+	config.WebAuthn = nil // simulate initialization being skipped when disabled
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/settings/webauthn/options", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	suite.Router.ServeHTTP(rec, req)
+
+	res := rec.Result()
+	body, _ := io.ReadAll(res.Body)
+	defer res.Body.Close()
+
+	suite.Equal(http.StatusForbidden, res.StatusCode)
+	suite.Contains(string(body), "webauthn is disabled on this server")
 }
 
 func (suite *WebAuthnTestSuite) TestWebauthn_RegisterAndLogin() {
@@ -525,11 +546,11 @@ func mergeCookies(base []*http.Cookie, updates []*http.Cookie) []*http.Cookie {
 }
 
 func createUser() *models.User {
-	userID := uuid.Must(uuid.NewV4()).String()
+	userID := uuid.NewV4().String()
 	passwdHash, _ := utils.HashPassword(userID+"_password", testPasswordSalt)
 	return &models.User{
 		ID:          userID,
-		WebauthnID:  uuid.Must(uuid.NewV4()).String(),
+		WebauthnID:  uuid.NewV4().String(),
 		AuthType:    "local",
 		Password:    passwdHash,
 		Credentials: []*models.WebAuthnCredential{},
@@ -557,11 +578,7 @@ func (suite *WebAuthnTestSuite) getLoginCookies(userID, password string) []*http
 func createAndLoadConfig() {
 	cfg := config.Empty()
 	cfg.Security.PasswordSalt = testPasswordSalt
-	hashKey := securecookie.GenerateRandomKey(64)
-	blockKey := securecookie.GenerateRandomKey(32)
-	sessionKey := securecookie.GenerateRandomKey(32)
-	cfg.Security.SecureCookie = securecookie.New(hashKey, blockKey)
-	cfg.Security.SessionKeyBytes = sessionKey
+	cfg.Security.CookieKeyBytes = securecookie.GenerateRandomKey(128)
 	cfg.Security.CookieMaxAgeSec = 120
 	cfg.Security.PasswordResetMaxRate = "0/1m"
 	cfg.Security.LoginMaxRate = "1000/1m"
@@ -569,5 +586,5 @@ func createAndLoadConfig() {
 	cfg.Server.PublicUrl = "https://example.com"
 	config.Set(cfg)
 	config.InitWebAuthn(cfg)
-	config.ResetSessionStore()
+	config.InitializeCookies()
 }

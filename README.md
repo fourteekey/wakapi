@@ -148,11 +148,13 @@ This can be configured either on the **client-side (preferred)** on a system-wid
 **Example:**
 ```ini
 [settings]
-api_key = defaults-to-this-api-key-when-not-defined-below
+api_key = waka-api-key
+
 [api_urls]
 .* = https://wakapi.dev/api|wakapi-api-key
-.* = https://api.wakatime.com/api/v1|waka-api-key
 ```
+
+The API key in `[settings]` is used for WakaTime's default API, while `[api_urls]` defines additional destinations. Do not add multiple `.*` entries because duplicate keys are invalid in an INI file and are ignored by `wakatime-cli`.
 
 See [wakatime-cli usage](https://github.com/wakatime/wakatime-cli/blob/develop/USAGE.md#api-urls-section) for details.
 
@@ -200,7 +202,7 @@ You can specify configuration options either via a config file (default: `config
 | `security.disable_local_auth` /<br> `WAKAPI_DISABLE_LOCAL_AUTH`                             | `false`                                          | Disables login via local credentials (username and password) to enforce OIDC provider login                                                                                                                                         |
 | `security.disable_webauthn` /<br> `WAKAPI_DISABLE_WEBAUTHN`                                 | `true`                                           | Disables login via WebAuthn (security keys, biometrics, etc.)                                                                                                                                                                       |
 | `security.password_salt` /<br> `WAKAPI_PASSWORD_SALT`                                       | -                                                | Pepper to use for password hashing                                                                                                                                                                                                  |
-| `security.session_key` /<br> `WAKAPI_SESSION_KEY`                                           | -                                                | Base64 encoded key (must decode to at least 32 bytes) used to encrypt sessions. If left empty, a random key is generated on startup.                                                                                                |
+| `security.cookie_key` /<br> `WAKAPI_COOKIE_KEY`                                             | -                                                | Base64 encoded key (should decode to at least 32 bytes) used to used derive session and authentication keys. If left empty, a random key is generated on startup.                                                                   |
 | `security.insecure_cookies` /<br> `WAKAPI_INSECURE_COOKIES`                                 | `true`                                           | Whether or not to allow cookies over HTTP. For production, it is **highly recommended** to serve Wakapi via HTTPS and set this to `false`.                                                                                          |
 | `security.cookie_max_age` /<br> `WAKAPI_COOKIE_MAX_AGE`                                     | `172800`                                         | Lifetime of authentication cookies in seconds or `0` to use [Session](https://developer.mozilla.org/en-US/docs/Web/HTTP/Cookies#Define_the_lifetime_of_a_cookie) cookies                                                            |
 | `security.allow_signup` /<br> `WAKAPI_ALLOW_SIGNUP`                                         | `true`                                           | Whether to enable local user registration                                                                                                                                                                                           |
@@ -218,7 +220,7 @@ You can specify configuration options either via a config file (default: `config
 | `security.login_max_rate` /<br> `WAKAPI_LOGIN_MAX_RATE`                                     | `10/1m`                                          | Rate limiting config for login endpoint in format `<max_req>/<multiplier><unit>`, where `unit` is one of `s`, `m` or `h`.                                                                                                           |
 | `security.password_reset_max_rate` /<br> `WAKAPI_PASSWORD_RESET_MAX_RATE`                   | `5/1h`                                           | Rate limiting config for password reset endpoint in format `<max_req>/<multiplier><unit>`, where `unit` is one of `s`, `m` or `h`.                                                                                                  |
 | `security.oidc`                                                                             | `[]`                                             | List of OpenID Connect provider configurations (for details, see [wiki](https://github.com/muety/wakapi/wiki/OpenID-Connect-login-(SSO)))                                                                                           |
-| `security.oidc[0].name` /<br> `WAKAPI_OIDC_PROVIDERS_0_NAME`                                | -                                                | Name / identifier for the OpenID Connect provider (e.g. `gitlab`)                                                                                                                                                                   |
+| `security.oidc[0].name` /<br> `WAKAPI_OIDC_PROVIDERS_0_NAME`                                | -                                                | Name / identifier for the OpenID Connect provider (e.g. `gitlab`), case-insensitive (normalized to lowercase internally)                                                                                                            |
 | `security.oidc[0].display_name` /<br> `WAKAPI_OIDC_PROVIDERS_0_DISPLAY_NAME`                | -                                                | Optional "human-readable" display name for the provider presented to the user                                                                                                                                                       |
 | `security.oidc[0].client_id` /<br> `WAKAPI_OIDC_PROVIDERS_0_CLIENT_ID`                      | -                                                | OAuth client name with this provider                                                                                                                                                                                                |
 | `security.oidc[0].client_secret` /<br> `WAKAPI_OIDC_PROVIDERS_0_CLIENT_SECRET`              | -                                                | OAuth client secret with this provider                                                                                                                                                                                              |
@@ -260,8 +262,8 @@ You can specify configuration options either via a config file (default: `config
 Wakapi uses [GORM](https://gorm.io) as an ORM. As a consequence, a set of different relational databases is supported.
 
 * [SQLite](https://sqlite.org/) (>= 3.31) (_default, easy setup_)
-* [MySQL](https://hub.docker.com/_/mysql) (_recommended, because most extensively tested_)
-* [MariaDB](https://hub.docker.com/_/mariadb) (_open-source MySQL alternative_)
+* [MySQL](https://hub.docker.com/_/mysql) (>= 8.0 LTS) (_recommended, because most extensively tested_)
+* [MariaDB](https://hub.docker.com/_/mariadb) (>= 11.4 LTS) (_open-source MySQL alternative_)
 * [Postgres](https://hub.docker.com/_/postgres) (_open-source as well_)
 
 ## 🔐 Authentication
@@ -271,7 +273,8 @@ Wakapi supports different types of user authentication.
 * **Cookie:** This method is used in the browser. Users authenticate by sending along an encrypted, secure, HTTP-only cookie (`wakapi_auth`) that was set in the server's response upon login.
 * **API key:**
     * **Via header:** This method is inspired by [WakaTime's auth. mechanism](https://wakatime.com/developers/#authentication) and is the common way to authenticate against API endpoints. Users set the `Authorization` header to `Basic <BASE64_TOKEN>`, where the latter part corresponds to your base64-hashed API key.
-    * **Vis query param:** Alternatively, users can also pass their plain API key as a query parameter (e.g. `?api_key=86648d74-19c5-452b-ba01-fb3ec70d4c2f`) in the URL with every request.
+    * **Via query param:** Alternatively, users can also pass their plain API key as a query parameter (e.g. `?api_key=86648d74-19c5-452b-ba01-fb3ec70d4c2f`) in the URL with every request.
+    * Note that API keys are only accepted for API endpoints (i.e. routes under `/api`), but not for regular web routes
 * **Trusted header:** This mechanism allows to delegate authentication to a **reverse proxy** (e.g. for SSO), that Wakapi will then trust blindly. See [#534](https://github.com/muety/wakapi/issues/534) for details.
     * Must be enabled via `trusted_header_auth` and configuring `trust_reverse_proxy_ip` in the config
     * Warning: This type of authentication is quite prone to misconfiguration. Make sure that your reverse proxy properly strips relevant headers from client requests.

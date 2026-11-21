@@ -63,6 +63,7 @@ func TestHeartbeat_GetKey(t *testing.T) {
 	assert.Equal(t, UnknownSummaryKey, sut.GetKey(SummaryOS))
 	assert.Equal(t, UnknownSummaryKey, sut.GetKey(SummaryMachine))
 	assert.Equal(t, UnknownSummaryKey, sut.GetKey(SummaryCategory))
+	assert.Equal(t, UnknownSummaryKey, sut.GetKey(SummaryAiModel))
 	assert.Equal(t, UnknownSummaryKey, sut.GetKey(SummaryLanguage))
 	assert.Equal(t, UnknownSummaryKey, sut.GetKey(SummaryEditor))
 	assert.Equal(t, UnknownSummaryKey, sut.GetKey(255))
@@ -86,6 +87,7 @@ func TestHeartbeat_Hashed(t *testing.T) {
 		UserAgent:       "ua1",
 		Origin:          "origin1",
 		OriginId:        "originid1",
+		AIModel:         "claude-3-5-sonnet",
 		Lines:           10,
 		LineNo:          5,
 		CursorPos:       100,
@@ -180,6 +182,12 @@ func TestHeartbeat_Hashed(t *testing.T) {
 	h21.OriginId = "originid2"
 	h21.Hashed()
 	assert.Equal(t, h1.Hash, h21.Hash)
+
+	// different ai model -> same hash
+	h22 := *h1
+	h22.AIModel = "gpt-4o"
+	h22.Hashed()
+	assert.Equal(t, h1.Hash, h22.Hash)
 }
 
 func TestHeartbeat_Hashed_NoCollision(t *testing.T) {
@@ -223,4 +231,50 @@ func TestHeartbeat_Unmarshal_IgnoreID(t *testing.T) {
 	raw3, err := json.Marshal(parsed)
 	assert.Nil(t, err)
 	assert.NotContains(t, raw3, "\"id\":")
+}
+
+func TestHeartbeat_Unmarshal_AICachedInputTokens(t *testing.T) {
+	raw := `{"entity":"claude-code","type":"app","time":1728422364.044,"ai_input_tokens":12,"ai_output_tokens":34,"ai_cached_input_tokens":5600}`
+
+	var parsed Heartbeat
+	assert.NoError(t, json.Unmarshal([]byte(raw), &parsed))
+	assert.Equal(t, 12, parsed.AIInputTokens)
+	assert.Equal(t, 34, parsed.AIOutputTokens)
+	assert.Equal(t, 5600, parsed.AICachedInputTokens)
+
+	// not serialized when unset
+	out, err := json.Marshal(&Heartbeat{Entity: "foo"})
+	assert.NoError(t, err)
+	assert.NotContains(t, string(out), "ai_cached_input_tokens")
+}
+
+func TestHeartbeat_Hashed_IgnoresAICachedInputTokens(t *testing.T) {
+	h1 := &Heartbeat{UserID: "user1", Entity: "entity1", Time: CustomTime(time.Unix(1600000000, 0))}
+	h2 := *h1
+	h2.AICachedInputTokens = 1234
+
+	assert.Equal(t, h1.Hashed().Hash, h2.Hashed().Hash)
+}
+
+func TestHeartbeat_Unmarshal_AIPromptLength(t *testing.T) {
+	raw := `{"entity":"claude-code","type":"app","time":1728422364.044,"ai_input_tokens":12,"ai_output_tokens":34,"ai_prompt_length":5600}`
+
+	var parsed Heartbeat
+	assert.NoError(t, json.Unmarshal([]byte(raw), &parsed))
+	assert.Equal(t, 12, parsed.AIInputTokens)
+	assert.Equal(t, 34, parsed.AIOutputTokens)
+	assert.Equal(t, 5600, parsed.AIPromptLength)
+
+	// not serialized when unset
+	out, err := json.Marshal(&Heartbeat{Entity: "foo"})
+	assert.NoError(t, err)
+	assert.NotContains(t, string(out), "ai_prompt_length")
+}
+
+func TestHeartbeat_Hashed_IgnoresAIPromptLength(t *testing.T) {
+	h1 := &Heartbeat{UserID: "user1", Entity: "entity1", Time: CustomTime(time.Unix(1600000000, 0))}
+	h2 := *h1
+	h2.AIPromptLength = 1234
+
+	assert.Equal(t, h1.Hashed().Hash, h2.Hashed().Hash)
 }

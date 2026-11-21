@@ -57,6 +57,7 @@ type IHeartbeatService interface {
 	GetLatestByOriginAndUser(string, *models.User) (*models.Heartbeat, error)
 	GetLatestByFilters(*models.User, *models.Filters, bool) (*models.Heartbeat, error)
 	GetEntitySetByUser(uint8, string) ([]string, error)
+	SearchBranchesByUser(string, string, string, time.Time, time.Time, int) ([]string, error)
 	StreamAllWithin(time.Time, time.Time, *models.User) (chan *models.Heartbeat, error)
 	StreamAllWithinRaw(time.Time, time.Time, *models.User) (chan *models.Heartbeat, error)
 	StreamAllWithinExcludingHeartbeats(time.Time, time.Time, *models.User, []models.HeartbeatExclusionFilter) (chan *models.Heartbeat, error)

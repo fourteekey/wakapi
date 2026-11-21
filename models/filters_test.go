@@ -115,6 +115,28 @@ func (suite *FiltersTestSuite) TestFilters_Match() {
 	assert.False(suite.T(), sut5.MatchHeartbeat(heartbeats[1]))
 }
 
+func (suite *FiltersTestSuite) TestFilters_MatchDuration() {
+	durations := []*Duration{
+		{Project: "wakapi", Branch: "master"},
+		{Project: "wakapi", Branch: "feat/search-by-branch"},
+	}
+
+	// branch filter must actually narrow durations (regression: MatchDuration used to ignore Branch)
+	sutBranch := NewFiltersWith(SummaryBranch, "master")
+	assert.True(suite.T(), sutBranch.MatchDuration(durations[0]))
+	assert.False(suite.T(), sutBranch.MatchDuration(durations[1]))
+
+	// project + branch combined
+	sutCombined := NewFiltersWith(SummaryProject, "wakapi").With(SummaryBranch, "feat/search-by-branch")
+	assert.False(suite.T(), sutCombined.MatchDuration(durations[0]))
+	assert.True(suite.T(), sutCombined.MatchDuration(durations[1]))
+
+	// no filters matches everything
+	sutEmpty := &Filters{}
+	assert.True(suite.T(), sutEmpty.MatchDuration(durations[0]))
+	assert.True(suite.T(), sutEmpty.MatchDuration(durations[1]))
+}
+
 func (suite *FiltersTestSuite) TestFilters_One() {
 	sut1 := NewFiltersWith(SummaryLanguage, "Java")
 	ok1, type1, filters1 := sut1.One()

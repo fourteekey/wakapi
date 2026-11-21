@@ -3,6 +3,7 @@ package helpers
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/muety/wakapi/config"
@@ -45,6 +46,17 @@ func ParseSummaryParams(r *http.Request) (*models.SummaryParams, error) {
 	}, nil
 }
 
+// nonEmptyValues returns the input values with blank/whitespace-only entries removed.
+func nonEmptyValues(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func ParseSummaryFilters(r *http.Request) *models.Filters {
 	filters := &models.Filters{}
 	if q := r.URL.Query().Get("project"); q != "" {
@@ -65,8 +77,9 @@ func ParseSummaryFilters(r *http.Request) *models.Filters {
 	if q := r.URL.Query().Get("label"); q != "" {
 		filters.With(models.SummaryLabel, q)
 	}
-	if q := r.URL.Query().Get("branch"); q != "" {
-		filters.With(models.SummaryBranch, q)
+	// branch supports multi-select: ?branch=a&branch=b -> OR filter (any of the selected branches)
+	if branches := nonEmptyValues(r.URL.Query()["branch"]); len(branches) > 0 {
+		filters.WithMultiple(models.SummaryBranch, branches)
 	}
 	if q := r.URL.Query().Get("entity"); q != "" {
 		filters.With(models.SummaryBranch, q)

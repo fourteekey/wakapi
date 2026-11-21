@@ -182,6 +182,7 @@ main {
 
 .entity-filter-control {
     width: 160px;
+    position: relative;
     @apply text-foreground text-sm;
 }
 
@@ -192,6 +193,109 @@ main {
 .entity-filter-control select {
     @apply truncate py-1.5 px-2.5;
 }
+
+/* searchable combobox filter (Project single-select / Branch multi-select) — Joined-combobox style */
+.combobox .combobox-input {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    border: 0;
+    border-radius: 4px;
+    background-color: rgb(var(--card));
+    color: rgb(var(--foreground));
+    padding: .375rem .625rem;
+    outline: 1px solid transparent;
+    outline-offset: 0;
+}
+
+.combobox .combobox-input::placeholder { color: rgb(var(--muted)); }
+
+.combobox.open .combobox-input {
+    background-color: rgb(var(--focused));
+    border-radius: 4px 4px 0 0;
+    outline: 1px solid rgb(var(--accent) / .6);
+}
+
+.entity-filter-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 15rem;
+    overflow-y: auto;
+    z-index: 50;
+    font-size: .875rem;
+    background-color: rgb(var(--focused));
+    border: 1px solid rgb(var(--accent) / .6);
+    border-top: 1px solid rgb(var(--muted) / .25);
+    border-radius: 0 0 4px 4px;
+}
+
+.entity-filter-dropdown li {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: .375rem .55rem;
+    cursor: pointer;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.entity-filter-dropdown li:hover { background-color: rgb(var(--card)); }
+
+.entity-filter-dropdown li.is-info,
+.entity-filter-dropdown li.is-info:hover {
+    color: rgb(var(--muted));
+    background-color: transparent;
+    cursor: default;
+}
+
+.entity-filter-dropdown li.sel { color: rgb(var(--accent)); font-weight: 600; }
+
+.entity-filter-dropdown li .box {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    border-radius: 3px;
+    border: 1.5px solid rgb(var(--muted));
+    display: grid;
+    place-items: center;
+    font-size: .7rem;
+    line-height: 1;
+    color: rgb(var(--primary));
+}
+
+.entity-filter-dropdown li.on .box { background-color: rgb(var(--accent)); border-color: rgb(var(--accent)); }
+.entity-filter-dropdown li.on .box::after { content: "\2713"; }
+.entity-filter-dropdown li.on { color: rgb(var(--primary)); }
+
+.entity-filter-dropdown li.selall {
+    color: rgb(var(--secondary));
+    font-weight: 600;
+    border-bottom: 1px solid rgb(var(--muted) / .2);
+}
+
+.entity-filter-dropdown li.clear-item {
+    color: rgb(var(--muted));
+    border-top: 1px solid rgb(var(--muted) / .2);
+}
+
+.entity-filter-dropdown li.clear-item:hover {
+    color: rgb(var(--foreground));
+    background-color: rgb(var(--card));
+}
+
+.entity-filter-dropdown li.apply-item {
+    justify-content: center;
+    margin: 4px;
+    border-radius: 4px;
+    background-color: rgb(var(--accent));
+    color: rgb(var(--primary));
+    font-weight: 600;
+}
+
+.entity-filter-dropdown li.apply-item:hover { background-color: rgb(var(--accent) / .85); }
 
 /*
 #summary-page svg rect {

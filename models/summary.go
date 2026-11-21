@@ -448,7 +448,16 @@ func (s *SummaryParams) HasFilters() bool {
 
 // IsProjectDetails indicates whether the summary parameters request a project details view.
 func (s *SummaryParams) IsProjectDetails() bool {
-	if !s.HasFilters() || s.Filters.EntityCount() > 1 || s.Filters.SelectFilteredOnly {
+	if !s.HasFilters() || s.Filters.SelectFilteredOnly {
+		return false
+	}
+	// a project-details view is scoped to a single project; a branch filter is allowed as a
+	// sub-filter (narrowing the project to one branch) without leaving the project-details view
+	entityCount := s.Filters.EntityCount()
+	if s.Filters.Branch.Exists() {
+		entityCount--
+	}
+	if entityCount > 1 {
 		return false
 	}
 	_, entity, filters := s.Filters.One()

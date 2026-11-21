@@ -1,3 +1,83 @@
+<style>
+/* Combobox filter styles are inlined here (not only in app.dist.css) because a
+   caching proxy in front of some deployments serves a stale app.dist.css. Inlining
+   guarantees these rules are always delivered and parsed with the page. */
+.entity-filter-control { position: relative; }
+.combobox .combobox-input {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    border: 0;
+    border-radius: 4px;
+    background-color: rgb(var(--card));
+    color: rgb(var(--foreground));
+    padding: .375rem .625rem;
+    outline: 1px solid transparent;
+    outline-offset: 0;
+}
+.combobox .combobox-input::placeholder { color: rgb(var(--muted)); }
+.combobox.open .combobox-input {
+    background-color: rgb(var(--focused));
+    border-radius: 4px 4px 0 0;
+    outline: 1px solid rgb(var(--accent) / .6);
+}
+.entity-filter-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 15rem;
+    overflow-y: auto;
+    z-index: 50;
+    font-size: .875rem;
+    background-color: rgb(var(--focused));
+    border: 1px solid rgb(var(--accent) / .6);
+    border-top: 1px solid rgb(var(--muted) / .25);
+    border-radius: 0 0 4px 4px;
+}
+.entity-filter-dropdown li {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: .375rem .55rem;
+    cursor: pointer;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.entity-filter-dropdown li:hover { background-color: rgb(var(--card)); }
+.entity-filter-dropdown li.is-info,
+.entity-filter-dropdown li.is-info:hover { color: rgb(var(--muted)); background-color: transparent; cursor: default; }
+.entity-filter-dropdown li.sel { color: rgb(var(--accent)); font-weight: 600; }
+.entity-filter-dropdown li .box {
+    flex: none;
+    width: 15px;
+    height: 15px;
+    border-radius: 3px;
+    border: 1.5px solid rgb(var(--muted));
+    display: grid;
+    place-items: center;
+    font-size: .7rem;
+    line-height: 1;
+    color: rgb(var(--primary));
+}
+.entity-filter-dropdown li.on .box { background-color: rgb(var(--accent)); border-color: rgb(var(--accent)); }
+.entity-filter-dropdown li.on .box::after { content: "\2713"; }
+.entity-filter-dropdown li.on { color: rgb(var(--primary)); }
+.entity-filter-dropdown li.selall { color: rgb(var(--secondary)); font-weight: 600; border-bottom: 1px solid rgb(var(--muted) / .2); }
+.entity-filter-dropdown li.clear-item { color: rgb(var(--muted)); border-top: 1px solid rgb(var(--muted) / .2); }
+.entity-filter-dropdown li.clear-item:hover { color: rgb(var(--foreground)); background-color: rgb(var(--card)); }
+.entity-filter-dropdown li.apply-item {
+    justify-content: center;
+    margin: 4px;
+    border-radius: 4px;
+    background-color: rgb(var(--accent));
+    color: rgb(var(--primary));
+    font-weight: 600;
+}
+.entity-filter-dropdown li.apply-item:hover { background-color: rgb(var(--accent) / .85); }
+</style>
+
 <template id="entity-filter-template">
     <div :id="type + '-filter-form'" class="entity-filter-control">
         <label :for="'select-' + type + '-filter'"><span class="iconify inline mr-1" data-icon="mdi:filter"></span> ${type}</label>
@@ -5,5 +85,38 @@
             <option :value="null">Filter by ${type} ...</option>
             <option v-for="o in options" :value="o">{{ "{{" }}o{{ "}}" }}</option>
         </select>
+    </div>
+</template>
+
+<template id="combobox-filter-template">
+    <div :id="type + '-filter-form'" class="entity-filter-control combobox" :class="{ open: open }" @click.stop @keydown="onKeydown">
+        <label :for="'input-' + type + '-filter'"><span class="iconify inline mr-1" data-icon="mdi:filter"></span> ${type}</label>
+        <input type="text"
+               :id="'input-' + type + '-filter'"
+               class="combobox-input"
+               :placeholder="placeholderText()"
+               v-model="query"
+               @input="onInput"
+               @focus="onFocus"
+               @click="onFocus"
+               autocomplete="off">
+        <ul v-show="open && (loading || visibleOptions.length || hint || (multiple ? selected.length : selection))" class="entity-filter-dropdown">
+            <li v-if="loading" class="is-info">Searching …</li>
+            <li v-if="multiple && !loading && visibleOptions.length"
+                class="selall"
+                :class="{ on: allVisibleSelected() }"
+                @mousedown.prevent="selectAllVisible()"><span class="box"></span>{{ "{{" }}allVisibleSelected() ? 'Deselect all' : 'Select all'{{ "}}" }} ({{ "{{" }}visibleOptions.length{{ "}}" }})</li>
+            <li v-for="o in (loading ? [] : visibleOptions)"
+                :key="o"
+                :class="{ on: multiple && isSelected(o), sel: !multiple && o === selection }"
+                @mousedown.prevent="multiple ? toggle(o) : select(o)"><span v-if="multiple" class="box"></span>{{ "{{" }}o{{ "}}" }}</li>
+            <li v-if="!loading && hint && !visibleOptions.length" class="is-info">{{ "{{" }}hint{{ "}}" }}</li>
+            <li v-if="!loading && (multiple ? selected.length : selection)"
+                class="clear-item"
+                @mousedown.prevent="multiple ? clearAll() : select(null)">{{ "{{" }}multiple ? 'Clear all (' + selected.length + ')' : 'Clear filter'{{ "}}" }}</li>
+            <li v-if="multiple && !loading && selected.length"
+                class="apply-item"
+                @mousedown.prevent="applyMulti()">{{ "{{" }}'Apply (' + selected.length + ')'{{ "}}" }}</li>
+        </ul>
     </div>
 </template>

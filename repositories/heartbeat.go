@@ -280,6 +280,38 @@ func (r *HeartbeatRepository) GetEntitySetByUser(entityType uint8, userId string
 	return results, nil
 }
 
+func (r *HeartbeatRepository) SearchBranchesByUser(userId, project, query string, from, to time.Time, limit int) ([]string, error) {
+	var results []string
+	q := r.db.
+		Model(&models.Heartbeat{}).
+		Distinct(models.GetEntityColumn(models.SummaryBranch)).
+		Where("user_id = ?", userId).
+		Where("branch <> ''").
+		Where("LOWER(branch) LIKE ?", "%"+strings.ToLower(query)+"%")
+
+	// "-" is the sentinel for the "unknown" project (heartbeats stored with an empty project),
+	// mirroring models.OrFilter.MatchAny; an empty string means "search across all projects"
+	if project == "-" {
+		q = q.Where("project = ?", "")
+	} else if project != "" {
+		q = q.Where("project = ?", project)
+	}
+
+	// scope to the selected time interval so only branches active in that period are returned;
+	// zero from/to (e.g. when the request omits an interval) means "any time"
+	if !from.IsZero() && !to.IsZero() {
+		q = r.queryAddTimeFilterBetween(q, from, to)
+	}
+
+	if err := q.
+		Order("branch").
+		Limit(limit).
+		Find(&results).Error; err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
 func (r *HeartbeatRepository) DeleteBefore(t time.Time) error {
 	q := r.queryAddTimeFilterLessEqual(r.db.Model(models.Heartbeat{}), t.Local())
 	if err := q.Delete(models.Heartbeat{}).Error; err != nil {

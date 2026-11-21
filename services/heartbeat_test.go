@@ -1,6 +1,7 @@
 package services
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -210,4 +211,36 @@ func (suite *HeartbeatServiceTestSuite) TestHeartbeatService_GetLatestByFilters_
 	}, 2*time.Second, 20*time.Millisecond)
 
 	suite.HeartbeatRepository.AssertNumberOfCalls(suite.T(), "GetLatestByFilters", 1)
+}
+
+func (suite *HeartbeatServiceTestSuite) TestHeartbeatService_SearchBranchesByUser_ForwardsArgs() {
+	from := time.Unix(1000, 0)
+	to := time.Unix(2000, 0)
+	suite.HeartbeatRepository.On("SearchBranchesByUser", TestUserId2, "myproject", "mai", from, to, 50).Return([]string{"main"}, nil)
+
+	result, err := suite.sut.SearchBranchesByUser(TestUserId2, "myproject", "mai", from, to, 50)
+
+	suite.NoError(err)
+	suite.Equal([]string{"main"}, result)
+	suite.HeartbeatRepository.AssertExpectations(suite.T())
+}
+
+func (suite *HeartbeatServiceTestSuite) TestHeartbeatService_SearchBranchesByUser_PropagatesError() {
+	suite.HeartbeatRepository.On("SearchBranchesByUser", TestUserId2, "", "mai", time.Time{}, time.Time{}, 50).Return([]string(nil), errors.New("boom"))
+
+	result, err := suite.sut.SearchBranchesByUser(TestUserId2, "", "mai", time.Time{}, time.Time{}, 50)
+
+	suite.Error(err)
+	suite.Nil(result)
+	suite.HeartbeatRepository.AssertExpectations(suite.T())
+}
+
+func (suite *HeartbeatServiceTestSuite) TestHeartbeatService_SearchBranchesByUser_FiltersWhitespaceOnly() {
+	suite.HeartbeatRepository.On("SearchBranchesByUser", TestUserId2, "", "mai", time.Time{}, time.Time{}, 50).Return([]string{"main", "   ", "", "maintenance"}, nil)
+
+	result, err := suite.sut.SearchBranchesByUser(TestUserId2, "", "mai", time.Time{}, time.Time{}, 50)
+
+	suite.NoError(err)
+	suite.Equal([]string{"main", "maintenance"}, result)
+	suite.HeartbeatRepository.AssertExpectations(suite.T())
 }

@@ -5,6 +5,7 @@
 
 <script src="assets/js/components/time-picker.js?v={{ getCacheBuster }}"></script>
 <script src="assets/js/components/entity-filter.js?v={{ getCacheBuster }}"></script>
+<script src="assets/js/components/combobox-filter.js?v={{ getCacheBuster }}"></script>
 <script type="module" src="assets/js/components/summary.js?v={{ getCacheBuster }}"></script>
 
 <body class="relative bg-background text-foreground p-4 pt-10 flex flex-col min-h-screen max-w-screen-xl mx-auto">
@@ -32,11 +33,24 @@
         {{ end }}
 
         <div class="flex-grow flex-shrink hidden md:flex justify-start gap-x-4 flex-wrap">
-            <div v-scope="EntityFilter({
+            <div v-scope="ComboboxFilter({
                 type: 'project',
                 options: wakapiData.availableProjectNames.toSorted(),
                 selection: null,
+                remote: false,
             })" @vue:mounted="mounted"></div>
+
+            {{ if .IsProjectDetails }}
+            <div v-scope="ComboboxFilter({
+                type: 'branch',
+                options: [],
+                multiple: true,
+                remote: true,
+                minChars: 0,
+                debounceMs: 1200,
+                project: wakapiData.currentProject,
+            })" @vue:mounted="mounted"></div>
+            {{ end }}
 
             <div v-scope="EntityFilter({
                 type: 'language',
@@ -401,6 +415,7 @@
     wakapiData.hourlyBreakdownFromTime = {{ .HourlyBreakdownFrom | json }}
     wakapiData.hourlyBreakdownToTime = {{ .SummaryParams.To | json }}
     wakapiData.availableProjectNames = {{ .AvailableFilters.ProjectNames | json }}
+    wakapiData.currentProject = {{ .GetProjectFilter | json }}
     wakapiData.availableLanguageNames = {{ .AvailableFilters.LanguageNames | json }}
     wakapiData.availableMachineNames = {{ .AvailableFilters.MachineNames | json }}
     wakapiData.availableLabelNames = {{ .AvailableFilters.LabelNames | json }}

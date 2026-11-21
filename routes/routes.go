@@ -59,8 +59,10 @@ func DefaultTemplateFuncs() template.FuncMap {
 		},
 		"getCacheBuster": func() string {
 			cfg := config.Get()
-			if v := config.Get().Version; v != "dev" {
-				return v
+			// include the app start timestamp so a rebuilt/restarted instance always serves
+			// fresh assets even when the version string is unchanged between builds of a branch
+			if v := cfg.Version; v != "dev" {
+				return v + "-" + cfg.AppStartTimestamp()
 			}
 			return cfg.AppStartTimestamp()
 		},

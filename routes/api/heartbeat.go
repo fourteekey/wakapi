@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/duke-git/lancet/v2/condition"
 	"github.com/go-chi/chi/v5"
@@ -55,6 +57,49 @@ func (h *HeartbeatApiHandler) RegisterRoutes(router chi.Router) {
 			r.Options(route.Pattern, cors.AllowAll().HandlerFunc)
 		}
 	})
+
+	router.Group(func(r chi.Router) {
+		r.Use(
+			middlewares.NewAuthenticateMiddleware(h.userSrvc).Handler,
+		)
+		r.Get("/branches", h.GetBranches)
+	})
+}
+
+// @Summary Search distinct branch names for the current user
+// @ID get-branches
+// @Tags heartbeat
+// @Produce json
+// @Param project query string false "Project to scope the search to"
+// @Param q query string false "Case-insensitive substring to search for (empty matches all, capped at 50)"
+// @Param interval query string false "Interval identifier to scope the search to (e.g. today, last_30_days)"
+// @Param from query string false "Start date (alternative to interval)"
+// @Param to query string false "End date (alternative to interval)"
+// @Security ApiKeyAuth
+// @Success 200 {array} string
+// @Router /branches [get]
+func (h *HeartbeatApiHandler) GetBranches(w http.ResponseWriter, r *http.Request) {
+	user := middlewares.GetPrincipal(r)
+
+	project := r.URL.Query().Get("project")
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+
+	// scope the search to the selected time interval (interval / from-to). If the request omits
+	// a valid range, fall back to searching across all time (zero from/to).
+	var from, to time.Time
+	if params, err := helpers.ParseSummaryParams(r); err == nil {
+		from, to = params.From, params.To
+	}
+
+	branches, err := h.heartbeatSrvc.SearchBranchesByUser(user.ID, project, query, from, to, 50)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(conf.ErrInternalServerError))
+		conf.Log().Request(r).Error("failed to search branches", "userID", user.ID, "error", err)
+		return
+	}
+
+	helpers.RespondJSON(w, r, http.StatusOK, branches)
 }
 
 // @Summary Push a new heartbeat
